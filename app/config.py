@@ -3,6 +3,8 @@ import os
 
 from kombu import Exchange, Queue
 
+NL_PREFIX = "notifynl"
+
 
 class QueueNames:
     LETTERS = "letter-tasks"
@@ -70,16 +72,16 @@ class Development(Config):
 
     STATSD_ENABLED = False
 
-    LETTERS_SCAN_BUCKET_NAME = "development-letters-scan"
-    LETTER_CACHE_BUCKET_NAME = "development-template-preview-cache"
-    LETTERS_PDF_BUCKET_NAME = "development-letters-pdf"
-    TEST_LETTERS_BUCKET_NAME = "development-test-letters"
-    INVALID_PDF_BUCKET_NAME = "development-letters-invalid-pdf"
-    SANITISED_LETTER_BUCKET_NAME = "development-letters-sanitise"
-    PRECOMPILED_ORIGINALS_BACKUP_LETTER_BUCKET_NAME = "development-letters-precompiled-originals-backup"
-    LETTER_ATTACHMENT_BUCKET_NAME = "development-letter-attachments"
+    LETTERS_SCAN_BUCKET_NAME = f"{NL_PREFIX}-{NOTIFY_ENVIRONMENT}-letter-scan"
+    LETTER_CACHE_BUCKET_NAME = f"{NL_PREFIX}-{NOTIFY_ENVIRONMENT}-template-preview-cache"
+    LETTERS_PDF_BUCKET_NAME = f"{NL_PREFIX}-{NOTIFY_ENVIRONMENT}-letters-pdf"
+    TEST_LETTERS_BUCKET_NAME = f"{NL_PREFIX}-{NOTIFY_ENVIRONMENT}-test-letters"
+    INVALID_PDF_BUCKET_NAME = f"{NL_PREFIX}-{NOTIFY_ENVIRONMENT}-letters-invalid-pdf"
+    SANITISED_LETTER_BUCKET_NAME = f"{NL_PREFIX}-{NOTIFY_ENVIRONMENT}-letters-sanitise"
+    PRECOMPILED_ORIGINALS_BACKUP_LETTER_BUCKET_NAME = f"{NL_PREFIX}-{NOTIFY_ENVIRONMENT}-letters-precompiled-originals-backup"
+    LETTER_ATTACHMENT_BUCKET_NAME = f"{NL_PREFIX}-{NOTIFY_ENVIRONMENT}-letter-attachments"
 
-    LETTER_LOGO_URL = "https://static-logos.notify.tools/letters"
+    LETTER_LOGO_URL = os.environ.get("LETTER_LOGO_URL", "http://localhost:6012")
 
 
 class Test(Development):

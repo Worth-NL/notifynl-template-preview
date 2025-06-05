@@ -5,6 +5,7 @@
 app/version.py
 
 .envrc
+.env
 
 ## We don’t allow committing certain file types that risk containing users’ personal information
 ## If you are sure that a file is OK, use "git add --force" to add it.
