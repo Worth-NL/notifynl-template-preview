@@ -81,20 +81,22 @@ class Development(Config):
     PRECOMPILED_ORIGINALS_BACKUP_LETTER_BUCKET_NAME = f"{NL_PREFIX}-{NOTIFY_ENVIRONMENT}-letters-precompiled-originals-backup"
     LETTER_ATTACHMENT_BUCKET_NAME = f"{NL_PREFIX}-{NOTIFY_ENVIRONMENT}-letter-attachments"
 
-    LETTER_LOGO_URL = os.environ.get("LETTER_LOGO_URL", "http://localhost:6012")
+    LETTER_LOGO_URL = os.environ.get("LETTER_LOGO_URL", "https://static-logos.admin.test.notifynl.nl/letters")
 
 
 class Test(Development):
     NOTIFY_ENVIRONMENT = "test"
 
-    LETTERS_SCAN_BUCKET_NAME = "test-letters-scan"
-    LETTER_CACHE_BUCKET_NAME = "test-template-preview-cache"
-    LETTERS_PDF_BUCKET_NAME = "test-letters-pdf"
-    TEST_LETTERS_BUCKET_NAME = "test-test-letters"
-    INVALID_PDF_BUCKET_NAME = "test-letters-invalid-pdf"
-    SANITISED_LETTER_BUCKET_NAME = "test-letters-sanitise"
-    PRECOMPILED_ORIGINALS_BACKUP_LETTER_BUCKET_NAME = "test-letters-precompiled-originals-backup"
-    LETTER_ATTACHMENT_BUCKET_NAME = "test-letter-attachments"
+    LETTERS_SCAN_BUCKET_NAME = f"{NL_PREFIX}-{NOTIFY_ENVIRONMENT}-letter-scan"
+    LETTER_CACHE_BUCKET_NAME = f"{NL_PREFIX}-{NOTIFY_ENVIRONMENT}-template-preview-cache"
+    LETTERS_PDF_BUCKET_NAME = f"{NL_PREFIX}-{NOTIFY_ENVIRONMENT}-letters-pdf"
+    TEST_LETTERS_BUCKET_NAME = f"{NL_PREFIX}-{NOTIFY_ENVIRONMENT}-test-letters"
+    INVALID_PDF_BUCKET_NAME = f"{NL_PREFIX}-{NOTIFY_ENVIRONMENT}-letters-invalid-pdf"
+    SANITISED_LETTER_BUCKET_NAME = f"{NL_PREFIX}-{NOTIFY_ENVIRONMENT}-letters-sanitise"
+    PRECOMPILED_ORIGINALS_BACKUP_LETTER_BUCKET_NAME = f"{NL_PREFIX}-{NOTIFY_ENVIRONMENT}-letters-precompiled-originals-backup"
+    LETTER_ATTACHMENT_BUCKET_NAME = f"{NL_PREFIX}-{NOTIFY_ENVIRONMENT}-letter-attachments"
+
+    LETTER_LOGO_URL = "https://static-logos.admin.test.notifynl.nl/letters"
 
 
 configs = {
