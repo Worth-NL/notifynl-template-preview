@@ -49,6 +49,7 @@ var/
 .installed.cfg
 *.egg
 venv/
+.venv/
 wheelhouse/
 
 # PyInstaller
