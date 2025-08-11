@@ -49,6 +49,9 @@ jobs:
       - name: Generate version file
         run: make generate-version-file
 
+      - name: Check for font
+        run: fc-list | grep Arial
+
       - uses: pavelzw/pytest-action@v2
         with:
           verbose: false
