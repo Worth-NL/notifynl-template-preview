@@ -32,9 +32,10 @@ jobs:
 
       - name: Install Arial font
         run: |
+          mkdir -p ~/.local/share/fonts/
+          cp docker/Arial.ttf ~/.local/share/fonts/
           sudo cp docker/Arial.ttf /usr/local/share/fonts/
           sudo fc-cache -f -v
-          fc-list | grep Arial
 
       - uses: astral-sh/setup-uv@v6
         with:
