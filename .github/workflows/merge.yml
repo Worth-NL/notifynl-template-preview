@@ -40,8 +40,6 @@ jobs:
       - name: Install application requirements
         run: |
           uv pip install -r requirements_for_test.txt
-          npm install
-          npm run build
 
       - name: Set tag
         id: set-tag
