@@ -1,4 +1,4 @@
-FROM python:3.11-slim-bullseye as base
+FROM python:3.11-slim-bullseye AS base
 
 ENV PYTHONUNBUFFERED=1
 ENV DEBIAN_FRONTEND=noninteractive
@@ -59,7 +59,7 @@ COPY . .
 RUN make generate-version-file  # This file gets copied across
 
 ##### Production Image #######################################################
-FROM base as production
+FROM base AS production
 
 RUN groupadd -r notify && useradd -r -g notify notify && chown -R notify:notify /home/vcap
 USER notify
@@ -78,7 +78,7 @@ RUN python -m compileall .
 ENTRYPOINT [ "/home/vcap/app/entrypoint.sh" ]
 
 ##### Test Image ##############################################################
-FROM production as test
+FROM production AS test
 
 USER root
 RUN echo "Install OS dependencies for test build" && apt-get update && \
