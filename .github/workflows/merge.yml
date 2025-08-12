@@ -9,7 +9,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  IMAGE: ghcr.io/worth-nl/document-download-frontend
+  IMAGE: ghcr.io/worth-nl/notifynl-template-preview
 
 jobs:
   build-tag-test:
