@@ -2,11 +2,3 @@
 -r requirements_for_test_common.in
 
 moto[s3]==4.1.5
-
-pytest-cov
-pytest-dotenv
-pytest-md
-pytest-emoji
-python-dotenv
-
-python-poppler
