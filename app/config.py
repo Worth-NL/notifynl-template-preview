@@ -3,8 +3,6 @@ import os
 
 from kombu import Exchange, Queue
 
-NL_PREFIX = "notifynl"
-
 
 class QueueNames:
     LETTERS = "letter-tasks"
@@ -72,6 +70,42 @@ class Development(Config):
 
     STATSD_ENABLED = False
 
+    LETTERS_SCAN_BUCKET_NAME = "development-letters-scan"
+    LETTER_CACHE_BUCKET_NAME = "development-template-preview-cache"
+    LETTERS_PDF_BUCKET_NAME = "development-letters-pdf"
+    TEST_LETTERS_BUCKET_NAME = "development-test-letters"
+    INVALID_PDF_BUCKET_NAME = "development-letters-invalid-pdf"
+    SANITISED_LETTER_BUCKET_NAME = "development-letters-sanitise"
+    PRECOMPILED_ORIGINALS_BACKUP_LETTER_BUCKET_NAME = "development-letters-precompiled-originals-backup"
+    LETTER_ATTACHMENT_BUCKET_NAME = "development-letter-attachments"
+
+    LETTER_LOGO_URL = "https://static-logos.notify.tools/letters"
+
+
+class Test(Development):
+    NOTIFY_ENVIRONMENT = "test"
+
+    LETTERS_SCAN_BUCKET_NAME = "test-letters-scan"
+    LETTER_CACHE_BUCKET_NAME = "test-template-preview-cache"
+    LETTERS_PDF_BUCKET_NAME = "test-letters-pdf"
+    TEST_LETTERS_BUCKET_NAME = "test-test-letters"
+    INVALID_PDF_BUCKET_NAME = "test-letters-invalid-pdf"
+    SANITISED_LETTER_BUCKET_NAME = "test-letters-sanitise"
+    PRECOMPILED_ORIGINALS_BACKUP_LETTER_BUCKET_NAME = "test-letters-precompiled-originals-backup"
+    LETTER_ATTACHMENT_BUCKET_NAME = "test-letter-attachments"
+    
+
+################
+### NotifyNL ###
+################
+NL_PREFIX = "notifynl"
+
+class DevNL(Config):
+    SERVER_NAME = os.getenv("SERVER_NAME")
+    NOTIFY_ENVIRONMENT = "development"
+
+    STATSD_ENABLED = False
+
     LETTERS_SCAN_BUCKET_NAME = f"{NL_PREFIX}-{NOTIFY_ENVIRONMENT}-letter-scan"
     LETTER_CACHE_BUCKET_NAME = f"{NL_PREFIX}-{NOTIFY_ENVIRONMENT}-template-preview-cache"
     LETTERS_PDF_BUCKET_NAME = f"{NL_PREFIX}-{NOTIFY_ENVIRONMENT}-letters-pdf"
@@ -81,10 +115,8 @@ class Development(Config):
     PRECOMPILED_ORIGINALS_BACKUP_LETTER_BUCKET_NAME = f"{NL_PREFIX}-{NOTIFY_ENVIRONMENT}-letters-precompiled-originals-backup"  # noqa: E501
     LETTER_ATTACHMENT_BUCKET_NAME = f"{NL_PREFIX}-{NOTIFY_ENVIRONMENT}-letter-attachments"
 
-    LETTER_LOGO_URL = os.environ.get("LETTER_LOGO_URL", "https://static-logos.admin.test.notifynl.nl/letters")
 
-
-class Test(Development):
+class TestNL(Config):
     NOTIFY_ENVIRONMENT = "test"
 
     LETTERS_SCAN_BUCKET_NAME = f"{NL_PREFIX}-{NOTIFY_ENVIRONMENT}-letter-scan"
@@ -96,10 +128,9 @@ class Test(Development):
     PRECOMPILED_ORIGINALS_BACKUP_LETTER_BUCKET_NAME = f"{NL_PREFIX}-{NOTIFY_ENVIRONMENT}-letters-precompiled-originals-backup"  # noqa: E501
     LETTER_ATTACHMENT_BUCKET_NAME = f"{NL_PREFIX}-{NOTIFY_ENVIRONMENT}-letter-attachments"
 
-    LETTER_LOGO_URL = "https://static-logos.admin.test.notifynl.nl/letters"
-
 
 configs = {
-    "development": Development,
+    "development": DevNL,
     "test": Test,
+    "testnl": TestNL
 }
