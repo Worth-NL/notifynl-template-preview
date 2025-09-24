@@ -17,7 +17,7 @@ RUN echo "Install binary app dependencies" \
         libcurl4 \
         curl \
         libpango1.0-dev=1.46.2-3 \
-        imagemagick=8:6.9.11.60+dfsg-1.3+deb11u6 \
+        imagemagick=8:6.9.11.60+dfsg-1.3+deb11u5 \
         libgs9-common=9.53.3~dfsg-7+deb11u7 \
         libgs9=9.53.3~dfsg-7+deb11u7 \
         ghostscript=9.53.3~dfsg-7+deb11u7 \
@@ -105,8 +105,8 @@ RUN mkdir -p app
 COPY --from=python_build --chown=notify:notify /opt/venv /opt/venv
 
 # Install dev/test requirements
-COPY --chown=notify:notify requirements_nl_test.txt ./
-RUN make bootstrap-nl
+COPY --chown=notify:notify requirements_for_test.txt ./
+RUN make bootstrap
 
 # Copy from the real world, one dir up (project root) into the environment's current working directory
 # Docker will rebuild from here down every time.
