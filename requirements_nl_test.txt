@@ -18,8 +18,6 @@ billiard==4.2.1
     # via
     #   -r requirements_nl.txt
     #   celery
-black==24.10.0
-    # via -r requirements_for_test_common.in
 blinker==1.9.0
     # via
     #   -r requirements_nl.txt
@@ -63,7 +61,6 @@ charset-normalizer==3.4.3
 click==8.2.1
     # via
     #   -r requirements_nl.txt
-    #   black
     #   celery
     #   click-didyoumean
     #   click-plugins
@@ -181,9 +178,7 @@ mistune==0.8.4
     #   notifications-utils
 moto==4.1.5
     # via -r requirements_nl_test.in
-mypy-extensions==1.1.0
-    # via black
-notifications-utils @ git+https://github.com/Worth-NL/notifynl-utils.git@3814be6471b46c13ecc11c3a62ef0af3e1f45db9
+notifications-utils @ git+https://github.com/Worth-NL/notifynl-utils.git@c8f5fd91401608b9d8cec3f59dcca1f89880aa87
     # via -r requirements_nl.txt
 ordered-set==4.1.0
     # via
@@ -192,12 +187,9 @@ ordered-set==4.1.0
 packaging==25.0
     # via
     #   -r requirements_nl.txt
-    #   black
     #   gunicorn
     #   kombu
     #   pytest
-pathspec==0.12.1
-    # via black
 pdf2image==1.12.1
     # via -r requirements_nl.txt
 phonenumbers==9.0.13
@@ -210,8 +202,6 @@ pillow==11.3.0
     #   pdf2image
     #   reportlab
     #   weasyprint
-platformdirs==4.4.0
-    # via black
 pluggy==1.6.0
     # via
     #   pytest
@@ -286,6 +276,7 @@ python-dateutil==2.9.0.post0
     #   celery
     #   freezegun
     #   moto
+    #   notifications-utils
 python-dotenv==1.1.1
     # via
     #   -r requirements_nl_test.in
@@ -322,7 +313,7 @@ requests-mock==1.12.1
     # via -r requirements_for_test_common.in
 responses==0.25.8
     # via moto
-ruff==0.8.2
+ruff==0.11.4
     # via -r requirements_for_test_common.in
 s3transfer==0.14.0
     # via
