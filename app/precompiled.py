@@ -9,7 +9,7 @@ import fitz
 import sentry_sdk
 from flask import Blueprint, current_app, jsonify, request, send_file
 from notifications_utils.pdf import is_letter_too_long, pdf_page_count
-from notifications_utils.recipient_validation.postal_address import PostalAddress
+from notifications_utils.recipient_validation.notifynl.postal_address import PostalAddress
 from pdf2image import convert_from_bytes
 from pypdf import PdfReader, PdfWriter
 from pypdf.errors import PdfReadError
@@ -53,8 +53,8 @@ ADDRESS_LINE_HEIGHT = ADDRESS_FONT_SIZE + 0.5
 FONT = "Arial"
 TRUE_TYPE_FONT_FILE = FONT + ".ttf"
 
-BORDER_LEFT_FROM_LEFT_OF_PAGE = 15.0
-BORDER_RIGHT_FROM_LEFT_OF_PAGE = A4_WIDTH - 15.0
+BORDER_LEFT_FROM_LEFT_OF_PAGE = 5.0
+BORDER_RIGHT_FROM_LEFT_OF_PAGE = A4_WIDTH - 5.0
 BORDER_TOP_FROM_TOP_OF_PAGE = 5.0
 BORDER_BOTTOM_FROM_TOP_OF_PAGE = A4_HEIGHT - 5.0
 
@@ -72,8 +72,8 @@ where we look for the address before we rewrite it.
 """
 ADDRESS_LEFT_FROM_LEFT_OF_PAGE = 24.60
 ADDRESS_RIGHT_FROM_LEFT_OF_PAGE = 120.0
-ADDRESS_TOP_FROM_TOP_OF_PAGE = 39.50
-ADDRESS_BOTTOM_FROM_TOP_OF_PAGE = 66.30
+ADDRESS_TOP_FROM_TOP_OF_PAGE = 50
+ADDRESS_BOTTOM_FROM_TOP_OF_PAGE = 90
 ADDRESS_BOUNDING_BOX = fitz.Rect(
     # add on a margin to ensure we capture all text
     (ADDRESS_LEFT_FROM_LEFT_OF_PAGE - 3) * mm,  # x1
@@ -85,7 +85,7 @@ ADDRESS_BOUNDING_BOX = fitz.Rect(
 LOGO_LEFT_FROM_LEFT_OF_PAGE = BORDER_LEFT_FROM_LEFT_OF_PAGE
 LOGO_RIGHT_FROM_LEFT_OF_PAGE = SERVICE_ADDRESS_LEFT_FROM_LEFT_OF_PAGE
 LOGO_TOP_FROM_TOP_OF_PAGE = BORDER_TOP_FROM_TOP_OF_PAGE
-LOGO_BOTTOM_FROM_TOP_OF_PAGE = 30.00
+LOGO_BOTTOM_FROM_TOP_OF_PAGE = 35.00
 
 A4_HEIGHT_IN_PTS = A4_HEIGHT * mm
 
@@ -708,8 +708,8 @@ def rewrite_address_block(pdf, *, page_count, allow_international_letters, filen
     if address.error_code:
         raise ValidationFailed(address.error_code, [1], page_count=page_count)
 
-    pdf = redact_precompiled_letter_address_block(pdf)
-    pdf = add_address_to_precompiled_letter(pdf, address.normalised)
+    # pdf = redact_precompiled_letter_address_block(pdf)
+    # pdf = add_address_to_precompiled_letter(pdf, address.normalised)
     return pdf, address.normalised
 
 
