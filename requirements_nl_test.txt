@@ -220,7 +220,7 @@ pycparser==2.23
     #   cffi
 pycurl==7.45.6
     # via -r requirements_nl.txt
-pydyf==0.11.0
+pydyf==0.8.0
     # via
     #   -r requirements_nl.txt
     #   weasyprint

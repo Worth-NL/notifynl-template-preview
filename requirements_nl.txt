@@ -138,8 +138,10 @@ pycparser==2.23
     # via cffi
 pycurl==7.45.6
     # via celery
-pydyf==0.11.0
-    # via weasyprint
+pydyf==0.8.0
+    # via
+    #   -r requirements_nl.in
+    #   weasyprint
 pymupdf==1.24.4
     # via -r requirements_nl.in
 pymupdfb==1.24.3

@@ -15,6 +15,8 @@ reportlab==3.6.13
 pdf2image==1.12.1
 PyMuPDF==1.24.4
 WeasyPrint==59
+# pydyf issue fix
+pydyf<0.9
 
 # Run `make bump-utils` to update to the latest version
 notifications-utils @ git+https://github.com/Worth-NL/notifynl-utils.git@101.1.2
