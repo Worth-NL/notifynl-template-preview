@@ -9,7 +9,7 @@ import fitz
 import sentry_sdk
 from flask import Blueprint, current_app, jsonify, request, send_file
 from notifications_utils.pdf import is_letter_too_long, pdf_page_count
-from notifications_utils.recipient_validation.postal_address import PostalAddress
+from notifications_utils.recipient_validation.notifynl.postal_address import PostalAddress
 from pdf2image import convert_from_bytes
 from pypdf import PdfReader, PdfWriter
 from pypdf.errors import PdfReadError
@@ -53,8 +53,8 @@ ADDRESS_LINE_HEIGHT = ADDRESS_FONT_SIZE + 0.5
 FONT = "Arial"
 TRUE_TYPE_FONT_FILE = FONT + ".ttf"
 
-BORDER_LEFT_FROM_LEFT_OF_PAGE = 15.0
-BORDER_RIGHT_FROM_LEFT_OF_PAGE = A4_WIDTH - 15.0
+BORDER_LEFT_FROM_LEFT_OF_PAGE = 5.0
+BORDER_RIGHT_FROM_LEFT_OF_PAGE = A4_WIDTH - 5.0
 BORDER_TOP_FROM_TOP_OF_PAGE = 5.0
 BORDER_BOTTOM_FROM_TOP_OF_PAGE = A4_HEIGHT - 5.0
 
@@ -72,8 +72,8 @@ where we look for the address before we rewrite it.
 """
 ADDRESS_LEFT_FROM_LEFT_OF_PAGE = 24.60
 ADDRESS_RIGHT_FROM_LEFT_OF_PAGE = 120.0
-ADDRESS_TOP_FROM_TOP_OF_PAGE = 39.50
-ADDRESS_BOTTOM_FROM_TOP_OF_PAGE = 66.30
+ADDRESS_TOP_FROM_TOP_OF_PAGE = 50
+ADDRESS_BOTTOM_FROM_TOP_OF_PAGE = 90
 ADDRESS_BOUNDING_BOX = fitz.Rect(
     # add on a margin to ensure we capture all text
     (ADDRESS_LEFT_FROM_LEFT_OF_PAGE - 3) * mm,  # x1
@@ -85,9 +85,12 @@ ADDRESS_BOUNDING_BOX = fitz.Rect(
 LOGO_LEFT_FROM_LEFT_OF_PAGE = BORDER_LEFT_FROM_LEFT_OF_PAGE
 LOGO_RIGHT_FROM_LEFT_OF_PAGE = SERVICE_ADDRESS_LEFT_FROM_LEFT_OF_PAGE
 LOGO_TOP_FROM_TOP_OF_PAGE = BORDER_TOP_FROM_TOP_OF_PAGE
-LOGO_BOTTOM_FROM_TOP_OF_PAGE = 30.00
+LOGO_BOTTOM_FROM_TOP_OF_PAGE = 35.00
 
 A4_HEIGHT_IN_PTS = A4_HEIGHT * mm
+
+MAX_FILESIZE = 2 * 1024 * 1024  # 2MB
+ALLOWED_FILESIZE_INFLATION_PERCENTAGE = 50  # warn if filesize after sanitising has grown by more than 50%
 
 precompiled_blueprint = Blueprint("precompiled_blueprint", __name__)
 
@@ -182,6 +185,35 @@ def sanitise_precompiled_letter():
     return jsonify(sanitise_json), status_code
 
 
+def _warn_if_filesize_has_grown(*, orig_filesize: int, new_filesize: int, filename: str) -> None:
+    orig_kb = orig_filesize / 1024
+    new_kb = new_filesize / 1024
+
+    if new_filesize > MAX_FILESIZE:
+        current_app.logger.error(
+            (
+                "template-preview post-sanitise filesize too big: "
+                "filename=%s, orig_size=%iKb, new_size=%iKb, over max_filesize=%iMb"
+            ),
+            filename,
+            orig_kb,
+            new_kb,
+            MAX_FILESIZE / 1024 / 1024,
+        )
+
+    elif orig_filesize * (1 + (ALLOWED_FILESIZE_INFLATION_PERCENTAGE / 100)) < new_filesize:
+        current_app.logger.warning(
+            (
+                "template-preview post-sanitise filesize too big: "
+                "filename=%s, orig_size=%iKb, new_size=%iKb, pct_bigger=%i%%"
+            ),
+            filename,
+            orig_kb,
+            new_kb,
+            (new_filesize / orig_filesize - 1) * 100,
+        )
+
+
 def sanitise_file_contents(encoded_string, *, allow_international_letters, filename, is_an_attachment=False):
     """
     Given a PDF, returns a new PDF that has been sanitised and dvla approved 👍
@@ -213,12 +245,16 @@ def sanitise_file_contents(encoded_string, *, allow_international_letters, filen
                 filename=filename,
             )
 
+        raw_file = file_data.read()
+
+        _warn_if_filesize_has_grown(orig_filesize=len(encoded_string), new_filesize=len(raw_file), filename=filename)
+
         return {
             "recipient_address": recipient_address,
             "page_count": page_count,
             "message": None,
             "invalid_pages": None,
-            "file": base64.b64encode(file_data.read()).decode("utf-8"),
+            "file": base64.b64encode(raw_file).decode("utf-8"),
         }
     # PdfReadError usually happens at pdf_page_count, when we first try to read the PDF.
     except (ValidationFailed, PdfReadError) as error:
@@ -672,8 +708,8 @@ def rewrite_address_block(pdf, *, page_count, allow_international_letters, filen
     if address.error_code:
         raise ValidationFailed(address.error_code, [1], page_count=page_count)
 
-    pdf = redact_precompiled_letter_address_block(pdf)
-    pdf = add_address_to_precompiled_letter(pdf, address.normalised)
+    # pdf = redact_precompiled_letter_address_block(pdf)
+    # pdf = add_address_to_precompiled_letter(pdf, address.normalised)
     return pdf, address.normalised
 
 

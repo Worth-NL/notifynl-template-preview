@@ -3,7 +3,7 @@ celery[sqs]==5.4.0
 jsonschema==4.15.0
 Flask-WeasyPrint==1.0.0
 Flask-HTTPAuth==4.8.0
-sentry-sdk[flask,celery]>=1.0.0,<2.0.0
+sentry-sdk[flask,celery]==1.45.1
 
 # pdf libraries
 html5lib==1.1
@@ -15,9 +15,11 @@ reportlab==3.6.13
 pdf2image==1.12.1
 PyMuPDF==1.24.4
 WeasyPrint==59
+# pydyf issue fix
+pydyf<0.9
 
 # Run `make bump-utils` to update to the latest version
-notifications-utils @ git+https://github.com/Worth-NL/notifynl-utils.git@99.3.3
+notifications-utils @ git+https://github.com/Worth-NL/notifynl-utils.git@101.1.2
 
 # gds-metrics requires prometheseus 0.2.0, override that requirement as 0.7.1 brings significant performance gains
 prometheus-client==0.14.1

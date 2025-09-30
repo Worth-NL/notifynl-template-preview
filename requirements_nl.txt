@@ -111,7 +111,7 @@ markupsafe==3.0.2
     #   werkzeug
 mistune==0.8.4
     # via notifications-utils
-notifications-utils @ git+https://github.com/Worth-NL/notifynl-utils.git@3814be6471b46c13ecc11c3a62ef0af3e1f45db9
+notifications-utils @ git+https://github.com/Worth-NL/notifynl-utils.git@c8f5fd91401608b9d8cec3f59dcca1f89880aa87
     # via -r requirements_nl.in
 ordered-set==4.1.0
     # via notifications-utils
@@ -138,8 +138,10 @@ pycparser==2.23
     # via cffi
 pycurl==7.45.6
     # via celery
-pydyf==0.11.0
-    # via weasyprint
+pydyf==0.8.0
+    # via
+    #   -r requirements_nl.in
+    #   weasyprint
 pymupdf==1.24.4
     # via -r requirements_nl.in
 pymupdfb==1.24.3
@@ -156,6 +158,7 @@ python-dateutil==2.9.0.post0
     # via
     #   botocore
     #   celery
+    #   notifications-utils
 python-json-logger==3.3.0
     # via notifications-utils
 pytz==2025.2

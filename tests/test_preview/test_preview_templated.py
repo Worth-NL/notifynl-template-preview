@@ -10,7 +10,7 @@ from freezegun import freeze_time
 from notifications_utils.s3 import S3ObjectNotFound
 
 from app.preview import get_html
-from tests.conftest import s3_response_body, set_config
+from tests.conftest import cache_response_body, set_config
 from tests.pdf_consts import cmyk_and_rgb_images_in_one_pdf, multi_page_pdf, valid_letter
 
 
@@ -124,7 +124,7 @@ def test_get_pdf_caches_with_correct_keys(
     mocked_cache_get,
     mocked_cache_set,
 ):
-    expected_cache_key = "templated/d0a9992bafc3669a8104aec93d89e4bc7dca4cb1.pdf"
+    expected_cache_key = "templated/2cc1a7bd86ac0ff804385f2517814f253904f096.pdf"
     resp = view_letter_template_pdf()
 
     assert resp.status_code == 200
@@ -148,7 +148,7 @@ def test_get_png_caches_with_correct_keys(
     mocked_cache_get,
     mocked_cache_set,
 ):
-    expected_cache_key = "templated/cfa8aaad30c73e8c98fcf09a29ac6523a624fe00.page01.png"
+    expected_cache_key = "pngs/a4edd9c89590a2e1d4701c911293e7925c6deaab.png"
     resp = view_letter_template_png()
 
     assert resp.status_code == 200
@@ -178,7 +178,7 @@ def test_get_png_caches_with_correct_keys(
         ),
         # pdf not in cache, but png cached
         (
-            [S3ObjectNotFound({}, ""), s3_response_body()],
+            [S3ObjectNotFound({}, ""), cache_response_body()],
             2,
             1,
         ),
@@ -186,13 +186,13 @@ def test_get_png_caches_with_correct_keys(
         (
             # first cache_get call to get pdf, second to get png, if png not in cache
             # call get_pdf again to create png from pdf
-            [s3_response_body(valid_letter), S3ObjectNotFound({}, ""), s3_response_body(valid_letter)],
+            [cache_response_body(valid_letter), S3ObjectNotFound({}, ""), cache_response_body(valid_letter)],
             2,
             1,
         ),
         # both pdf and png found in cache
         (
-            [s3_response_body(), s3_response_body()],
+            [cache_response_body(valid_letter), cache_response_body()],
             2,
             0,
         ),
@@ -236,7 +236,7 @@ def test_view_letter_template_png_hits_cache_correct_number_of_times(
         ),
         # pdfs not in cache, but png cached
         (
-            [S3ObjectNotFound({}, ""), S3ObjectNotFound({}, ""), s3_response_body()],
+            [S3ObjectNotFound({}, ""), S3ObjectNotFound({}, ""), cache_response_body()],
             3,
             2,
         ),
@@ -245,8 +245,8 @@ def test_view_letter_template_png_hits_cache_correct_number_of_times(
             # first cache_get call to get pdf, second to get png, if png not in cache
             # call get_pdf again to create png from pdf
             [
-                s3_response_body(valid_letter),
-                s3_response_body(valid_letter),
+                cache_response_body(valid_letter),
+                cache_response_body(valid_letter),
                 S3ObjectNotFound({}, ""),
             ],
             3,
@@ -254,7 +254,7 @@ def test_view_letter_template_png_hits_cache_correct_number_of_times(
         ),
         # both pdfs and png found in cache
         (
-            [s3_response_body(valid_letter), s3_response_body(valid_letter), s3_response_body()],
+            [cache_response_body(valid_letter), cache_response_body(valid_letter), cache_response_body()],
             3,
             0,
         ),
@@ -289,7 +289,7 @@ def test_view_letter_template_png_hits_cache_correct_number_of_times_for_a_bilin
         # attachment not cached
         (S3ObjectNotFound({}, ""), 2, 1),
         # attachment is cached
-        (s3_response_body(), 2, 0),
+        (cache_response_body(), 2, 0),
     ],
 )
 def test_view_letter_template_png_with_attachment_hits_cache_correct_number_of_times(
@@ -302,9 +302,9 @@ def test_view_letter_template_png_with_attachment_hits_cache_correct_number_of_t
     number_of_cache_get_calls,
     number_of_cache_set_calls,
 ):
-    mocked_cache_get.side_effect = [s3_response_body(), attachment_cache]
+    mocked_cache_get.side_effect = [cache_response_body(data=b"\x00"), attachment_cache]
 
-    mocker.patch("app.templated.add_attachment_to_letter", return_value=multi_page_pdf)
+    mocker.patch("app.templated.add_attachment_to_letter", return_value=BytesIO(multi_page_pdf))
 
     response = client.post(
         url_for(
@@ -420,11 +420,12 @@ def test_view_letter_template_png_route_gets_png_for_page(
 def test_view_letter_template_for_letter_attachment(
     client,
     auth_header,
+    mocked_cache_get,
     mocker,
 ):
     mocked_hide_notify = mocker.patch("app.preview.hide_notify_tag")
     mock_s3download_attachment_file = mocker.patch(
-        "app.letter_attachments.s3download", return_value=BytesIO(valid_letter)
+        "app.letter_attachments.caching_s3download", return_value=BytesIO(valid_letter)
     )
     response = client.post(
         url_for(
@@ -451,7 +452,7 @@ def test_view_letter_template_for_letter_attachment(
     )
     assert response.status_code == 200
     assert not mocked_hide_notify.called
-    assert mock_s3download_attachment_file.called_once_with(
+    mock_s3download_attachment_file.assert_called_once_with(
         current_app.config["LETTER_ATTACHMENT_BUCKET_NAME"], "service-5678/1234.pdf"
     )
     assert response.mimetype == "image/png"
@@ -472,8 +473,9 @@ def test_preview_for_letter_attachment(
     auth_header,
     mocker,
 ):
+    attachment_id = str(uuid.uuid4())
     mock_s3download_attachment_file = mocker.patch(
-        "app.letter_attachments.s3download", return_value=BytesIO(valid_letter)
+        "app.letter_attachments.caching_s3download", return_value=BytesIO(valid_letter)
     )
     response = client.post(
         url_for(
@@ -483,14 +485,14 @@ def test_preview_for_letter_attachment(
         data=json.dumps(
             {
                 "service_id": "123",
-                "letter_attachment_id": str(uuid.uuid4()),
+                "letter_attachment_id": attachment_id,
             }
         ),
         headers={"Content-type": "application/json", **auth_header},
     )
     assert response.status_code == 200
-    assert mock_s3download_attachment_file.called_once_with(
-        current_app.config["LETTER_ATTACHMENT_BUCKET_NAME"], "service-5678/1234.pdf"
+    mock_s3download_attachment_file.assert_called_once_with(
+        current_app.config["LETTER_ATTACHMENT_BUCKET_NAME"], f"service-123/{attachment_id}.pdf"
     )
     assert response.mimetype == "image/png"
 
@@ -500,8 +502,9 @@ def test_preview_for_letter_attachment(
 def test_view_letter_attachment_preview_when_requested_page_out_of_range(
     client, auth_header, mocker, letter_attachment, requested_page
 ):
+    attachment_id = str(uuid.uuid4())
     mock_s3download_attachment_file = mocker.patch(
-        "app.letter_attachments.s3download", return_value=BytesIO(valid_letter)
+        "app.letter_attachments.caching_s3download", return_value=BytesIO(valid_letter)
     )
     response = client.post(
         url_for(
@@ -511,23 +514,27 @@ def test_view_letter_attachment_preview_when_requested_page_out_of_range(
         data=json.dumps(
             {
                 "service_id": "123",
-                "letter_attachment_id": str(uuid.uuid4()),
+                "letter_attachment_id": attachment_id,
             }
         ),
         headers={"Content-type": "application/json", **auth_header},
     )
     assert response.status_code == 400
     assert response.json["message"] == f"400 Bad Request: Letter attachment does not have a page {requested_page}"
-    assert mock_s3download_attachment_file.called_once
+    mock_s3download_attachment_file.assert_called_once_with(
+        "test-letter-attachments", f"service-123/{attachment_id}.pdf"
+    )
 
 
 @pytest.mark.skip(reason="[NOTIFYNL] AWS permissions break test.")
 @pytest.mark.parametrize("letter_attachment, requested_page", [(None, 2), ({"page_count": 1, "id": "1234"}, 3)])
 def test_view_letter_template_png_when_requested_page_out_of_range(
-    client, auth_header, mocker, letter_attachment, requested_page
+    client, auth_header, mocker, mocked_cache_get, letter_attachment, requested_page
 ):
     mocker.patch("app.preview.hide_notify_tag")
-    mocker.patch("app.templated.add_attachment_to_letter", return_value=cmyk_and_rgb_images_in_one_pdf)  # 2-page PDF
+    mocker.patch(
+        "app.templated.add_attachment_to_letter", return_value=BytesIO(cmyk_and_rgb_images_in_one_pdf)
+    )  # 2-page PDF
     response = client.post(
         url_for(
             "preview_blueprint.view_letter_template_png",
@@ -569,6 +576,7 @@ def test_letter_template_constructed_properly_for_pdf(view_letter_template_reque
         logo_file_name="hm-government.svg",
         date=None,
         language="english",
+        includes_first_page=True,
     )
 
 
@@ -700,7 +708,7 @@ def test_POST_page_count(
 @pytest.mark.skip(reason="[NOTIFYNL] AWS permissions break test.")
 @freeze_time("2012-12-12")
 def test_page_count_from_cache(client, auth_header, mocker, mocked_cache_get):
-    mocked_cache_get.side_effect = [s3_response_body(multi_page_pdf)]
+    mocked_cache_get.side_effect = [cache_response_body(multi_page_pdf)]
     mocker.patch(
         "app.preview.HTML",
         side_effect=AssertionError("Uncached method shouldn’t be called"),
@@ -724,7 +732,7 @@ def test_page_count_from_cache(client, auth_header, mocker, mocked_cache_get):
         headers={"Content-type": "application/json", **auth_header},
     )
     assert mocked_cache_get.call_args[0][0] == "test-template-preview-cache"
-    assert mocked_cache_get.call_args[0][1] == "templated/03ba71054b80b0ffc758d3b228784d1bfb8c0ca3.pdf"
+    assert mocked_cache_get.call_args[0][1] == "templated/63587b04d0018ea9012dfb6a67d76d2d55c87ae1.pdf"
     assert response.status_code == 200
     assert json.loads(response.get_data(as_text=True)) == {
         "count": 10,

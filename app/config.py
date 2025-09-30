@@ -8,6 +8,20 @@ class QueueNames:
     LETTERS = "letter-tasks"
     SANITISE_LETTERS = "sanitise-letter-tasks"
 
+    @staticmethod
+    def all_queues():
+        return [
+            QueueNames.LETTERS,
+            QueueNames.SANITISE_LETTERS,
+        ]
+
+    @staticmethod
+    def predefined_queues(prefix, aws_region, aws_account_id):
+        return {
+            f"{prefix}{queue}": {"url": f"https://sqs.{aws_region}.amazonaws.com/{aws_account_id}/{prefix}{queue}"}
+            for queue in QueueNames.all_queues()
+        }
+
 
 class TaskNames:
     PROCESS_SANITISED_LETTER = "process-sanitised-letter"
@@ -22,17 +36,22 @@ class Config:
     DANGEROUS_SALT = os.environ.get("DANGEROUS_SALT")
     SECRET_KEY = os.environ.get("SECRET_KEY")
 
+    # Celery log levels
+    CELERY_WORKER_LOG_LEVEL = os.getenv("CELERY_WORKER_LOG_LEVEL", "CRITICAL").upper()
+    CELERY_BEAT_LOG_LEVEL = os.getenv("CELERY_BEAT_LOG_LEVEL", "INFO").upper()
+
     NOTIFICATION_QUEUE_PREFIX = os.environ.get("NOTIFICATION_QUEUE_PREFIX")
 
+    AWS_ACCOUNT_ID = os.environ.get("AWS_ACCOUNT_ID", "123456789012")
     CELERY = {
         "broker_url": "https://sqs.eu-west-1.amazonaws.com",
         "broker_transport": "sqs",
         "broker_transport_options": {
             "region": AWS_REGION,
-            "visibility_timeout": 310,
             "wait_time_seconds": 20,  # enable long polling, with a wait time of 20 seconds
             "queue_name_prefix": NOTIFICATION_QUEUE_PREFIX,
             "is_secure": True,
+            "predefined_queues": QueueNames.predefined_queues(NOTIFICATION_QUEUE_PREFIX, AWS_REGION, AWS_ACCOUNT_ID),
         },
         "timezone": "Europe/London",
         "worker_max_memory_per_child": 50,
@@ -68,6 +87,8 @@ class Development(Config):
     SERVER_NAME = os.getenv("SERVER_NAME")
     NOTIFY_ENVIRONMENT = "development"
 
+    CELERY_WORKER_LOG_LEVEL = "INFO"
+
     STATSD_ENABLED = False
 
     LETTERS_SCAN_BUCKET_NAME = "development-letters-scan"
@@ -81,9 +102,18 @@ class Development(Config):
 
     LETTER_LOGO_URL = "https://static-logos.notify.tools/letters"
 
+    CELERY = {
+        **Config.CELERY,
+        "broker_transport_options": {
+            key: value for key, value in Config.CELERY["broker_transport_options"].items() if key != "predefined_queues"
+        },
+    }
+
 
 class Test(Development):
     NOTIFY_ENVIRONMENT = "test"
+
+    CELERY_WORKER_LOG_LEVEL = "INFO"
 
     LETTERS_SCAN_BUCKET_NAME = "test-letters-scan"
     LETTER_CACHE_BUCKET_NAME = "test-template-preview-cache"
@@ -93,7 +123,13 @@ class Test(Development):
     SANITISED_LETTER_BUCKET_NAME = "test-letters-sanitise"
     PRECOMPILED_ORIGINALS_BACKUP_LETTER_BUCKET_NAME = "test-letters-precompiled-originals-backup"
     LETTER_ATTACHMENT_BUCKET_NAME = "test-letter-attachments"
-    
+    CELERY = {
+        **Config.CELERY,
+        "broker_transport_options": {
+            key: value for key, value in Config.CELERY["broker_transport_options"].items() if key != "predefined_queues"
+        },
+    }
+
 
 ################
 ### NotifyNL ###
@@ -115,6 +151,13 @@ class DevNL(Config):
     PRECOMPILED_ORIGINALS_BACKUP_LETTER_BUCKET_NAME = f"{NL_PREFIX}-{NOTIFY_ENVIRONMENT}-letters-precompiled-originals-backup"  # noqa: E501
     LETTER_ATTACHMENT_BUCKET_NAME = f"{NL_PREFIX}-{NOTIFY_ENVIRONMENT}-letter-attachments"
 
+    CELERY = {
+        **Config.CELERY,
+        "broker_transport_options": {
+            key: value for key, value in Config.CELERY["broker_transport_options"].items() if key != "predefined_queues"
+        },
+    }
+
 
 class TestNL(Config):
     NOTIFY_ENVIRONMENT = "test"
@@ -127,6 +170,13 @@ class TestNL(Config):
     SANITISED_LETTER_BUCKET_NAME = f"{NL_PREFIX}-{NOTIFY_ENVIRONMENT}-letters-sanitise"
     PRECOMPILED_ORIGINALS_BACKUP_LETTER_BUCKET_NAME = f"{NL_PREFIX}-{NOTIFY_ENVIRONMENT}-letters-precompiled-originals-backup"  # noqa: E501
     LETTER_ATTACHMENT_BUCKET_NAME = f"{NL_PREFIX}-{NOTIFY_ENVIRONMENT}-letter-attachments"
+
+    CELERY = {
+        **Config.CELERY,
+        "broker_transport_options": {
+            key: value for key, value in Config.CELERY["broker_transport_options"].items() if key != "predefined_queues"
+        },
+    }
 
 
 configs = {
