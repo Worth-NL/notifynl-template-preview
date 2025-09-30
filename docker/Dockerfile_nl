@@ -104,7 +104,7 @@ COPY --from=python_build --chown=notify:notify /opt/venv /opt/venv
 
 # Install dev/test requirements
 COPY --chown=notify:notify requirements_nl_test.txt ./
-RUN make bootstrap
+RUN make bootstrap-nl
 
 # Copy from the real world, one dir up (project root) into the environment's current working directory
 # Docker will rebuild from here down every time.

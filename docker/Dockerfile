@@ -55,7 +55,7 @@ COPY requirements.txt .
 
 RUN echo "Installing python requirements" && \
     python3 -m venv /opt/venv && \
-    uv pip sync --python /opt/venv/bin/python requirements_nl.txt
+    uv pip sync --python /opt/venv/bin/python requirements.txt
 
 COPY . .
 RUN make generate-version-file  # This file gets copied across
@@ -98,7 +98,7 @@ USER notify
 
 ENV HOME=/home/vcap
 
-# Make sure the app/ directory is there so that "make bootstrap-nl" can create app/version.py
+# Make sure the app/ directory is there so that "make bootstrap" can create app/version.py
 RUN mkdir -p app
 
 # Copying to overwrite is faster than RUN chown notify:notify ...
