@@ -1,0 +1,8 @@
+{
+    "python.defaultInterpreterPath": ".venv/bin/python",
+    "python.analysis.extraPaths": [
+        "${workspaceFolder:[Notify] Utils}",
+        "${workspaceFolder:[Notify] Jinja templates}"
+    ],
+    "python.testing.pytestEnabled": true
+}
