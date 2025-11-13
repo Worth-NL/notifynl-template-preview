@@ -5,8 +5,7 @@
       "name": "Template Preview API",
       "type": "debugpy",
       "request": "launch",
-      "envFile": ".env",
-      "python": ".venv/bin/python",
+      "envFile": "${workspaceFolder}/.env",
       "module": "flask",
       "args": [
         "run",
@@ -20,8 +19,7 @@
       "name": "Template Preview Worker",
       "type": "debugpy",
       "request": "launch",
-      "envFile": ".env",
-      "python": ".venv/bin/python",
+      "envFile": "${workspaceFolder}/.env",
       "module": "celery",
       "args": [
         "-A",
