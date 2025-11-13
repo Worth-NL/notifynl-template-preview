@@ -250,7 +250,7 @@ def test_get_invalid_pages_second_page(x, y, expected_failed, client):
         #     (297 - 39) * mm,
         #     1,
         #     ("content-outside-printable-area", [1]),
-        # ),  # under the logo 
+        # ),  # under the logo
         (24.6 * mm, (297 - 39) * mm, 2, ("", [])),  # Same place on page 2 should be ok
         (0, 0, 2, ("content-outside-printable-area", [2])),
         (200, 200, 2, ("", [])),
