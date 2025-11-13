@@ -1,0 +1,49 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Template Preview API",
+      "type": "debugpy",
+      "request": "launch",
+      "envFile": ".env",
+      "python": ".venv/bin/python",
+      "module": "flask",
+      "args": [
+        "run",
+        "--port",
+        "6013",
+        "--debug"
+      ],
+      "consoleName": "Template Preview"
+    },
+    {
+      "name": "Template Preview Worker",
+      "type": "debugpy",
+      "request": "launch",
+      "envFile": ".env",
+      "python": ".venv/bin/python",
+      "module": "celery",
+      "args": [
+        "-A",
+        "run_celery.notify_celery",
+        "worker",
+        "-l",
+        "INFO",
+        "-E",
+        "-P",
+        "solo"
+      ],
+      "consoleName": "Template Preview Worker"
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Template Preview",
+      "configurations": [
+        "Template Preview API",
+        "Template Preview Worker"
+      ],
+      "stopAll": true
+    }
+  ]
+}
