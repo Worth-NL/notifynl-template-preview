@@ -2,10 +2,20 @@
     "version": "2.0.0",
     "tasks": [
         {
+            "label": "Install Arial font",
+            "type": "shell",
+            "command": "mkdir -p ~/.local/share/fonts/ && cp docker/Arial.ttf ~/.local/share/fonts/ && sudo fc-cache -f",
+            "problemMatcher": [],
+            "presentation": {
+                "showReuseMessage": false,
+                "close": true
+            }
+        },
+        {
             "label": "Generate Template-preview version file",
             "type": "shell",
             "command": "make generate-version-file",
-            "dependsOn": ["Install local notifynl-utils"],
+            "dependsOn": ["Install Arial font"],
             "problemMatcher": [],
             "presentation": {
                 "showReuseMessage": false,
