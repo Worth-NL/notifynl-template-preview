@@ -1,0 +1,48 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Generate Template-preview version file",
+            "type": "shell",
+            "command": "make generate-version-file",
+            "dependsOn": ["Install local notifynl-utils"],
+            "problemMatcher": [],
+            "presentation": {
+                "showReuseMessage": false,
+                "close": true
+            }
+        },
+        {
+            "label": "Install Template-preview Python requirements",
+            "type": "shell",
+            "command": "uv pip install -r requirements_nl_test.txt",
+            "dependsOn": ["Generate Template-preview version file"],
+            "problemMatcher": [],
+            "presentation": {
+                "showReuseMessage": false,
+                "close": true
+            },
+            "options": {
+                "env": {
+                    "UV_LINK_MODE": "copy"
+                }
+            }
+        },
+        {
+            "label": "Install Template-preview local notifynl-utils",
+            "type": "shell",
+            "command": "uv pip uninstall notifynl-utils && uv pip install -e ../notifynl-utils",
+            "dependsOn": ["Install Template-preview Python requirements"],
+            "problemMatcher": [],
+            "presentation": {
+                "showReuseMessage": false,
+                "close": true
+            },
+            "options": {
+                "env": {
+                    "UV_LINK_MODE": "copy"
+                }
+            }
+        }
+    ]
+}

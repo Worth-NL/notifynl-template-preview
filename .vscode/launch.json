@@ -13,7 +13,8 @@
         "6013",
         "--debug"
       ],
-      "consoleName": "Template Preview"
+      "consoleName": "Template Preview",
+      "preLaunchTask": "Install Template-preview local notifynl-utils"
     },
     {
       "name": "Template Preview Worker",
