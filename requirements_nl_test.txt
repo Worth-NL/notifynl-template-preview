@@ -178,7 +178,7 @@ mistune==0.8.4
     #   notifications-utils
 moto==4.1.5
     # via -r requirements_nl_test.in
-notifications-utils @ git+https://github.com/Worth-NL/notifynl-utils.git@c8f5fd91401608b9d8cec3f59dcca1f89880aa87
+notifications-utils @ git+https://github.com/Worth-NL/notifynl-utils.git@9f10d50088b9ad73af262fe49f8fec7e6324be96
     # via -r requirements_nl.txt
 ordered-set==4.1.0
     # via
