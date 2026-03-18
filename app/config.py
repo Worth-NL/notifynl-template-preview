@@ -179,8 +179,29 @@ class TestNL(Config):
     }
 
 
+class ProdNL(Config):
+    NOTIFY_ENVIRONMENT = "production"
+
+    LETTERS_SCAN_BUCKET_NAME = f"{NL_PREFIX}-{NOTIFY_ENVIRONMENT}-letters-scan"
+    LETTER_CACHE_BUCKET_NAME = f"{NL_PREFIX}-{NOTIFY_ENVIRONMENT}-template-preview-cache"
+    LETTERS_PDF_BUCKET_NAME = f"{NL_PREFIX}-{NOTIFY_ENVIRONMENT}-letters-pdf"
+    TEST_LETTERS_BUCKET_NAME = f"{NL_PREFIX}-{NOTIFY_ENVIRONMENT}-test-letters"
+    INVALID_PDF_BUCKET_NAME = f"{NL_PREFIX}-{NOTIFY_ENVIRONMENT}-letters-invalid-pdf"
+    SANITISED_LETTER_BUCKET_NAME = f"{NL_PREFIX}-{NOTIFY_ENVIRONMENT}-letters-sanitise"
+    PRECOMPILED_ORIGINALS_BACKUP_LETTER_BUCKET_NAME = f"{NL_PREFIX}-{NOTIFY_ENVIRONMENT}-letters-precompiled-originals-backup"  # noqa: E501
+    LETTER_ATTACHMENT_BUCKET_NAME = f"{NL_PREFIX}-{NOTIFY_ENVIRONMENT}-letter-attachments"
+
+    CELERY = {
+        **Config.CELERY,
+        "broker_transport_options": {
+            key: value for key, value in Config.CELERY["broker_transport_options"].items() if key != "predefined_queues"
+        },
+    }
+
+
 configs = {
     "development": DevNL,
     "test": Test,
-    "testnl": TestNL
+    "testnl": TestNL,
+    "production": ProdNL
 }
