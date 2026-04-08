@@ -1,5 +1,4 @@
 import base64
-import pickle
 from io import BytesIO
 
 import dateutil.parser
@@ -42,18 +41,17 @@ def png_from_pdf(data, page_number, hide_notify=False):
     except PdfReadError:
         abort(400, "Could not read PDF")
 
-    serialised_page = pickle.dumps(page)
+    page_pdf = BytesIO()
+    writer = PdfWriter()
+    writer.add_page(page)
+    writer.write(page_pdf)
+    page_pdf_bytes = page_pdf.getvalue()
 
-    @current_app.cache(serialised_page, hide_notify, folder="pngs", extension="png")
+    @current_app.cache(page_pdf_bytes, hide_notify, folder="pngs", extension="png")
     def _generate():
         output = BytesIO()
-        new_pdf = BytesIO()
-        writer = PdfWriter()
-        writer.add_page(pickle.loads(serialised_page))
-        writer.write(new_pdf)
-        new_pdf.seek(0)
 
-        with Image(blob=new_pdf, resolution=150) as rasterized_pdf:
+        with Image(blob=BytesIO(page_pdf_bytes), resolution=150) as rasterized_pdf:
             if hide_notify:
                 hide_notify_tag(rasterized_pdf)
             with rasterized_pdf.convert("png") as converted:
