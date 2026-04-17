@@ -41,17 +41,28 @@ def png_from_pdf(data, page_number, hide_notify=False):
     except PdfReadError:
         abort(400, "Could not read PDF")
 
+    # [NOTIFYNL] removed pickle for serialisation because it causes infinite recursion with our template
     page_pdf = BytesIO()
     writer = PdfWriter()
     writer.add_page(page)
     writer.write(page_pdf)
-    page_pdf_bytes = page_pdf.getvalue()
+    page_pdf.seek(0)
+    serialised_page = base64.b64encode(page_pdf.read()).decode("utf-8")
 
-    @current_app.cache(page_pdf_bytes, hide_notify, folder="pngs", extension="png")
+    @current_app.cache(serialised_page, hide_notify, folder="pngs", extension="png")
     def _generate():
         output = BytesIO()
 
-        with Image(blob=BytesIO(page_pdf_bytes), resolution=150) as rasterized_pdf:
+        new_pdf = BytesIO()
+        writer = PdfWriter()
+
+        # Deserialize the page data
+        page_data = base64.b64decode(serialised_page)
+        writer.add_page(PdfReader(BytesIO(page_data)).pages[0])
+        writer.write(new_pdf)
+        new_pdf.seek(0)
+
+        with Image(blob=new_pdf, resolution=150) as rasterized_pdf:
             if hide_notify:
                 hide_notify_tag(rasterized_pdf)
             with rasterized_pdf.convert("png") as converted:
