@@ -142,6 +142,10 @@ idna==3.10
     # via
     #   -r requirements_nl.txt
     #   requests
+importlib-metadata==8.7.1
+    # via
+    #   -r requirements_nl.txt
+    #   opentelemetry-api
 iniconfig==2.1.0
     # via pytest
 itsdangerous==2.2.0
@@ -178,8 +182,12 @@ mistune==0.8.4
     #   notifications-utils
 moto==4.1.5
     # via -r requirements_nl_test.in
-notifications-utils @ git+https://github.com/Worth-NL/notifynl-utils.git@9f10d50088b9ad73af262fe49f8fec7e6324be96
+notifications-utils @ git+https://github.com/Worth-NL/notifynl-utils.git@ba1b3b36da648aaa40f29de4489e7b04847165e6
     # via -r requirements_nl.txt
+opentelemetry-api==1.41.0
+    # via
+    #   -r requirements_nl.txt
+    #   notifications-utils
 ordered-set==4.1.0
     # via
     #   -r requirements_nl.txt
@@ -230,7 +238,7 @@ pymupdfb==1.24.3
     # via
     #   -r requirements_nl.txt
     #   pymupdf
-pypdf==3.13.0
+pypdf==6.9.2
     # via
     #   -r requirements_nl.txt
     #   notifications-utils
@@ -345,15 +353,20 @@ tinycss2==1.4.0
     #   -r requirements_nl.txt
     #   cssselect2
     #   weasyprint
+typing-extensions==4.15.0
+    # via
+    #   -r requirements_nl.txt
+    #   opentelemetry-api
 tzdata==2025.2
     # via
     #   -r requirements_nl.txt
     #   celery
     #   kombu
-urllib3==2.5.0
+urllib3==2.6.3
     # via
     #   -r requirements_nl.txt
     #   botocore
+    #   notifications-utils
     #   requests
     #   responses
     #   sentry-sdk
@@ -386,6 +399,10 @@ werkzeug==3.1.3
     #   moto
 xmltodict==0.15.1
     # via moto
+zipp==3.23.1
+    # via
+    #   -r requirements_nl.txt
+    #   importlib-metadata
 zopfli==0.2.3.post1
     # via
     #   -r requirements_nl.txt
