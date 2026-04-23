@@ -182,7 +182,7 @@ mistune==0.8.4
     #   notifications-utils
 moto==4.1.5
     # via -r requirements_nl_test.in
-notifications-utils @ git+https://github.com/Worth-NL/notifynl-utils.git@ba1b3b36da648aaa40f29de4489e7b04847165e6
+notifications-utils @ git+https://github.com/Worth-NL/notifynl-utils.git@1bdadf229fcb5ac6cf7c5d7e73e5b80474e2760e
     # via -r requirements_nl.txt
 opentelemetry-api==1.41.0
     # via
