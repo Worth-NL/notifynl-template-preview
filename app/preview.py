@@ -1,5 +1,4 @@
 import base64
-import pickle
 from io import BytesIO
 
 import dateutil.parser
@@ -42,14 +41,24 @@ def png_from_pdf(data, page_number, hide_notify=False):
     except PdfReadError:
         abort(400, "Could not read PDF")
 
-    serialised_page = pickle.dumps(page)
+    # [NOTIFYNL] removed pickle for serialisation because it causes infinite recursion with our template
+    page_pdf = BytesIO()
+    writer = PdfWriter()
+    writer.add_page(page)
+    writer.write(page_pdf)
+    page_pdf.seek(0)
+    serialised_page = base64.b64encode(page_pdf.read()).decode("utf-8")
 
     @current_app.cache(serialised_page, hide_notify, folder="pngs", extension="png")
     def _generate():
         output = BytesIO()
+
         new_pdf = BytesIO()
         writer = PdfWriter()
-        writer.add_page(pickle.loads(serialised_page))
+
+        # Deserialize the page data
+        page_data = base64.b64decode(serialised_page)
+        writer.add_page(PdfReader(BytesIO(page_data)).pages[0])
         writer.write(new_pdf)
         new_pdf.seek(0)
 
