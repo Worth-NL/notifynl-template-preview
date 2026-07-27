@@ -2,8 +2,6 @@
 DOCKER_IMAGE_NAME=notifications-template-preview
 PORT=6013
 
-source environment.sh
-
 if [[ "${@}" == "web" || "${@}" == "web-local" ]]; then
   EXPOSED_PORTS="-e PORT=${PORT} -p 127.0.0.1:${PORT}:${PORT}"
 else
@@ -11,11 +9,13 @@ else
 fi
 
 docker run -it --rm \
+  --network notifynl-devcontainer_devcontainer_devcontainer \
   -e NOTIFY_ENVIRONMENT=development \
   -e FLASK_DEBUG=1 \
   -e STATSD_ENABLED= \
-  -e AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-$(aws configure get aws_access_key_id)} \
-  -e AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-$(aws configure get aws_secret_access_key)} \
+  -e AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-test} \
+  -e AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-test} \
+  -e AWS_ENDPOINT_URL=${AWS_ENDPOINT_URL:-http://ministack:4566} \
   -e TEMPLATE_PREVIEW_INTERNAL_SECRETS='["my-secret-key"]' \
   -e DANGEROUS_SALT="dev-notify-salt" \
   -e SECRET_KEY="dev-notify-secret-key" \

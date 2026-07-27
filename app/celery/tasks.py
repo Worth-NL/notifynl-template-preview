@@ -10,15 +10,16 @@ from celery import Task
 from flask import current_app
 from flask_weasyprint import HTML
 from notifications_utils import LETTER_MAX_PAGE_COUNT
+from notifications_utils.pdf import is_letter_too_long, pdf_page_count
 from notifications_utils.s3 import s3download, s3upload
 from notifications_utils.template import LetterPrintTemplate
 
 from app import notify_celery
-from app.config import QueueNames, TaskNames
+from app.config import QueueNames, TaskNames, TaskNamesNL
 from app.precompiled import sanitise_file_contents
 from app.preview import get_page_count_for_pdf
 from app.templated import generate_templated_pdf
-from app.utils import PDFPurpose, get_datetime_from_json, get_transient_letter_file_location
+from app.utils import PDFPurpose, get_datetime_from_json, get_transient_letter_file_location, merge_letter_parts
 from app.weasyprint_hack import WeasyprintError
 
 
@@ -91,6 +92,146 @@ def sanitise_and_upload_letter(self: Task, notification_id, filename, allow_inte
         queue=QueueNames.LETTERS,
         MessageGroupId=self.message_group_id,
     )
+
+
+@notify_celery.task(name=TaskNamesNL.SANITISE_AND_MERGE_LETTER_PARTS)
+def sanitise_and_merge_letter_parts(notification_id, filenames, allow_international_letters=False):
+    """
+    Precompiled letters submitted as multiple PDFs (up to 3), to be merged into a single
+    letter in submission order. Each part is sanitised individually first - part 0 is
+    treated as the primary/address-bearing document (same as a single-PDF letter), parts
+    1-2 are treated like existing letter attachments (structural/CMYK checks only, no
+    address extraction, no duplicate NOTIFY tag). Only once every part has individually
+    passed are they merged and uploaded - exactly once, as a single file under the
+    canonical (part 0) filename, so everything downstream of this task (process-sanitised-letter
+    onwards) is unaware multiple PDFs were ever involved.
+    """
+    current_app.logger.info("Sanitising %s letter part(s) for notification with id %s", len(filenames), notification_id)
+
+    canonical_filename = filenames[0]
+    sibling_filenames = filenames[1:]
+
+    try:
+        sanitised_parts = []
+        recipient_address = None
+        sanitisation_details = None
+
+        for part_index, filename in enumerate(filenames):
+            pdf_content = s3download(current_app.config["LETTERS_SCAN_BUCKET_NAME"], filename).read()
+            sanitisation_details = sanitise_file_contents(
+                pdf_content,
+                allow_international_letters=allow_international_letters,
+                filename=filename,
+                is_an_attachment=part_index > 0,
+            )
+
+            if sanitisation_details.get("message"):
+                break
+
+            sanitised_parts.append(BytesIO(base64.b64decode(sanitisation_details["file"].encode())))
+            if part_index == 0:
+                recipient_address = sanitisation_details["recipient_address"]
+
+        if sanitisation_details.get("message"):
+            validation_status = "failed"
+            message = sanitisation_details["message"]
+            page_count = sanitisation_details["page_count"]
+            invalid_pages = sanitisation_details["invalid_pages"]
+            _cleanup_letter_part_scan_objects(sibling_filenames)
+        else:
+            merged_pdf = merge_letter_parts(sanitised_parts) if len(sanitised_parts) > 1 else sanitised_parts[0]
+            total_page_count = pdf_page_count(merged_pdf)
+            merged_pdf.seek(0)
+
+            if is_letter_too_long(total_page_count):
+                validation_status = "failed"
+                message = "letter-too-long"
+                page_count = total_page_count
+                invalid_pages = None
+                _cleanup_letter_part_scan_objects(sibling_filenames)
+            else:
+                validation_status = "passed"
+                message = None
+                page_count = total_page_count
+                invalid_pages = None
+                file_data = merged_pdf.read()
+
+                # If the file already exists in S3, it will be overwritten
+                s3upload(
+                    filedata=file_data,
+                    region=current_app.config["AWS_REGION"],
+                    bucket_name=current_app.config["SANITISED_LETTER_BUCKET_NAME"],
+                    file_location=canonical_filename,
+                )
+                # upload a backup copy of the original PDFs that will be held in the bucket for a week
+                copy_s3_object(
+                    current_app.config["LETTERS_SCAN_BUCKET_NAME"],
+                    canonical_filename,
+                    current_app.config["PRECOMPILED_ORIGINALS_BACKUP_LETTER_BUCKET_NAME"],
+                    f"{notification_id}.pdf",
+                )
+                _backup_letter_part_scan_objects(sibling_filenames, notification_id)
+
+        current_app.logger.info(
+            "Notification %(status)s sanitisation: %(id)s", {"status": validation_status, "id": notification_id}
+        )
+
+    except BotoClientError:
+        current_app.logger.exception(
+            "Error downloading %s from scan bucket or uploading to sanitise bucket for notification %s",
+            filenames,
+            notification_id,
+        )
+        return
+
+    sanitise_data = {
+        "page_count": page_count,
+        "message": message,
+        "invalid_pages": invalid_pages,
+        "validation_status": validation_status,
+        "filename": canonical_filename,
+        "notification_id": notification_id,
+        "address": recipient_address,
+    }
+    signed_data = current_app.signing_client.encode(sanitise_data)
+
+    notify_celery.send_task(
+        name=TaskNames.PROCESS_SANITISED_LETTER,
+        args=(signed_data,),
+        queue=QueueNames.LETTERS,
+    )
+
+
+def _backup_letter_part_scan_objects(sibling_filenames, notification_id):
+    # part 0's raw scan-bucket object is backed up/deleted by the caller (matching the
+    # single-PDF flow); sibling parts (2/3) aren't seen by anything else downstream, so
+    # this task is responsible for their backup/cleanup too.
+    s3 = boto3.resource("s3")
+    for part_number, filename in enumerate(sibling_filenames, start=2):
+        copy_s3_object(
+            current_app.config["LETTERS_SCAN_BUCKET_NAME"],
+            filename,
+            current_app.config["PRECOMPILED_ORIGINALS_BACKUP_LETTER_BUCKET_NAME"],
+            f"{notification_id}.part{part_number}.pdf",
+        )
+        s3.Object(current_app.config["LETTERS_SCAN_BUCKET_NAME"], filename).delete()
+
+
+def _cleanup_letter_part_scan_objects(sibling_filenames):
+    # On failure, part 0's raw scan-bucket object is moved to the invalid-pdf bucket by
+    # notifynl-api's (unmodified) process-sanitised-letter task, which only ever knows
+    # about the canonical (part 0) filename. Sibling parts (2/3) are never seen by that
+    # task, so this task moves them itself, so a failing multi-part submission is fully
+    # inspectable together rather than leaving parts 2/3 orphaned in the scan bucket.
+    s3 = boto3.resource("s3")
+    for filename in sibling_filenames:
+        copy_s3_object(
+            current_app.config["LETTERS_SCAN_BUCKET_NAME"],
+            filename,
+            current_app.config["INVALID_PDF_BUCKET_NAME"],
+            filename,
+        )
+        s3.Object(current_app.config["LETTERS_SCAN_BUCKET_NAME"], filename).delete()
 
 
 def copy_s3_object(source_bucket, source_filename, target_bucket, target_filename, metadata=None):

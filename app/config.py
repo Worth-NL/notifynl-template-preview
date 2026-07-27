@@ -16,10 +16,10 @@ class QueueNames:
         ]
 
     @staticmethod
-    def predefined_queues(prefix, aws_region, aws_account_id):
+    def predefined_queues(prefix, aws_region, aws_account_id, endpoint_url=None):
+        base = endpoint_url or f"https://sqs.{aws_region}.amazonaws.com"
         return {
-            f"{prefix}{queue}": {"url": f"https://sqs.{aws_region}.amazonaws.com/{aws_account_id}/{prefix}{queue}"}
-            for queue in QueueNames.all_queues()
+            f"{prefix}{queue}": {"url": f"{base}/{aws_account_id}/{prefix}{queue}"} for queue in QueueNames.all_queues()
         }
 
 
@@ -142,6 +142,10 @@ class Test(Development):
 NL_PREFIX = "notifynl"
 
 
+class TaskNamesNL(TaskNames):
+    SANITISE_AND_MERGE_LETTER_PARTS = "sanitise-and-merge-letter-parts"
+
+
 class DevNL(Config):
     SERVER_NAME = os.getenv("SERVER_NAME")
     NOTIFY_ENVIRONMENT = "development"
@@ -161,8 +165,22 @@ class DevNL(Config):
 
     CELERY = {
         **Config.CELERY,
+        "broker_url": "http://ministack:4566",
         "broker_transport_options": {
-            key: value for key, value in Config.CELERY["broker_transport_options"].items() if key != "predefined_queues"
+            **{
+                key: value
+                for key, value in Config.CELERY["broker_transport_options"].items()
+                if key != "predefined_queues"
+            },
+            "is_secure": False,
+            # ministack's default test account ID (000000000000), not
+            # Config.AWS_ACCOUNT_ID's real-AWS-shaped default.
+            "predefined_queues": QueueNames.predefined_queues(
+                Config.NOTIFICATION_QUEUE_PREFIX,
+                Config.AWS_REGION,
+                "000000000000",
+                endpoint_url="http://ministack:4566",
+            ),
         },
     }
 

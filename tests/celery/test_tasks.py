@@ -23,12 +23,13 @@ from app.celery.tasks import (
     create_pdf_for_templated_letter,
     recreate_pdf_for_precompiled_letter,
     recreate_pdf_for_template_letter_attachments,
+    sanitise_and_merge_letter_parts,
     sanitise_and_upload_letter,
 )
 from app.config import QueueNames
 from app.utils import get_transient_letter_file_location
 from app.weasyprint_hack import WeasyprintError
-from tests.pdf_consts import bad_postcode, blank_with_address, multi_page_pdf, no_colour
+from tests.pdf_consts import bad_postcode, blank_page, blank_with_address, multi_page_pdf, no_colour, valid_letter
 
 
 @contextmanager
@@ -175,6 +176,233 @@ def test_sanitise_and_upload_letter_raises_a_boto_error(mocker, client, caplog):
         "Error downloading filename.pdf from scan bucket or uploading to sanitise bucket for notification abc-123"
         in caplog.messages
     )
+
+
+def _sanitise_result(page_count, file_bytes, address=None):
+    # Matches the return shape of the real (unmocked) sanitise_file_contents on success.
+    return {
+        "recipient_address": address,
+        "page_count": page_count,
+        "message": None,
+        "invalid_pages": None,
+        "file": base64.b64encode(file_bytes).decode("utf-8"),
+    }
+
+
+def test_sanitise_and_merge_letter_parts_merges_two_parts_in_order(mocker, client):
+    # sanitise_file_contents is mocked here (rather than exercised for real via Ghostscript/CMYK
+    # conversion) so this test is deterministic and doesn't depend on real PDF fixture content -
+    # the abort-on-first-failing-part test below exercises the real function instead.
+    mocker.patch("app.celery.tasks.s3download", side_effect=[BytesIO(b"raw-part-1"), BytesIO(b"raw-part-2")])
+    mock_sanitise = mocker.patch(
+        "app.celery.tasks.sanitise_file_contents",
+        side_effect=[
+            _sanitise_result(1, valid_letter, address="Queen Elizabeth\nBuckingham Palace\nLondon\nSW1 1AA"),
+            _sanitise_result(1, blank_page),
+        ],
+    )
+    mock_upload = mocker.patch("app.celery.tasks.s3upload")
+    mock_celery = mocker.patch("app.celery.tasks.notify_celery.send_task")
+    mocker.patch("app.celery.tasks.copy_s3_object")
+
+    sanitise_and_merge_letter_parts("abc-123", ["filename.pdf", "filename.PART2.pdf"])
+
+    assert [call.kwargs["is_an_attachment"] for call in mock_sanitise.call_args_list] == [False, True]
+
+    merged_pdf = PdfReader(BytesIO(mock_upload.call_args.kwargs["filedata"]))
+    assert len(merged_pdf.pages) == 2
+
+    mock_upload.assert_called_once_with(
+        filedata=mocker.ANY,
+        region=current_app.config["AWS_REGION"],
+        bucket_name=current_app.config["SANITISED_LETTER_BUCKET_NAME"],
+        file_location="filename.pdf",
+    )
+
+    encoded_task_args = current_app.signing_client.encode(
+        {
+            "page_count": 2,
+            "message": None,
+            "invalid_pages": None,
+            "validation_status": "passed",
+            "filename": "filename.pdf",
+            "notification_id": "abc-123",
+            "address": "Queen Elizabeth\nBuckingham Palace\nLondon\nSW1 1AA",
+        }
+    )
+    mock_celery.assert_called_once_with(
+        args=(encoded_task_args,),
+        name="process-sanitised-letter",
+        queue="letter-tasks",
+    )
+
+
+def test_sanitise_and_merge_letter_parts_backs_up_all_parts_on_success(mocker, client):
+    mocker.patch(
+        "app.celery.tasks.s3download",
+        side_effect=[BytesIO(b"raw-part-1"), BytesIO(b"raw-part-2"), BytesIO(b"raw-part-3")],
+    )
+    mocker.patch(
+        "app.celery.tasks.sanitise_file_contents",
+        side_effect=[
+            _sanitise_result(1, valid_letter, address="Queen Elizabeth\nBuckingham Palace\nLondon\nSW1 1AA"),
+            _sanitise_result(1, blank_page),
+            _sanitise_result(1, blank_page),
+        ],
+    )
+    mocker.patch("app.celery.tasks.s3upload")
+    mocker.patch("app.celery.tasks.notify_celery.send_task")
+    mock_copy = mocker.patch("app.celery.tasks.copy_s3_object")
+    mock_boto3 = mocker.patch("app.celery.tasks.boto3")
+
+    sanitise_and_merge_letter_parts("abc-123", ["filename.pdf", "filename.PART2.pdf", "filename.PART3.pdf"])
+
+    assert mock_copy.call_args_list == [
+        mocker.call(
+            current_app.config["LETTERS_SCAN_BUCKET_NAME"],
+            "filename.pdf",
+            current_app.config["PRECOMPILED_ORIGINALS_BACKUP_LETTER_BUCKET_NAME"],
+            "abc-123.pdf",
+        ),
+        mocker.call(
+            current_app.config["LETTERS_SCAN_BUCKET_NAME"],
+            "filename.PART2.pdf",
+            current_app.config["PRECOMPILED_ORIGINALS_BACKUP_LETTER_BUCKET_NAME"],
+            "abc-123.part2.pdf",
+        ),
+        mocker.call(
+            current_app.config["LETTERS_SCAN_BUCKET_NAME"],
+            "filename.PART3.pdf",
+            current_app.config["PRECOMPILED_ORIGINALS_BACKUP_LETTER_BUCKET_NAME"],
+            "abc-123.part3.pdf",
+        ),
+    ]
+    assert mock_boto3.resource.return_value.Object.call_args_list == [
+        mocker.call(current_app.config["LETTERS_SCAN_BUCKET_NAME"], "filename.PART2.pdf"),
+        mocker.call(current_app.config["LETTERS_SCAN_BUCKET_NAME"], "filename.PART3.pdf"),
+    ]
+    assert mock_boto3.resource.return_value.Object.return_value.delete.call_count == 2
+
+
+def test_sanitise_and_merge_letter_parts_aborts_on_first_failing_part(mocker, client):
+    mock_download = mocker.patch("app.celery.tasks.s3download", side_effect=[BytesIO(no_colour)])
+    mock_upload = mocker.patch("app.celery.tasks.s3upload")
+    mock_celery = mocker.patch("app.celery.tasks.notify_celery.send_task")
+    mocker.patch("app.celery.tasks.copy_s3_object")
+    mocker.patch("app.celery.tasks.boto3")
+
+    sanitise_and_merge_letter_parts("abc-123", ["filename.pdf", "filename.PART2.pdf"])
+
+    # the second part is never even downloaded, since the first part already failed
+    mock_download.assert_called_once_with(current_app.config["LETTERS_SCAN_BUCKET_NAME"], "filename.pdf")
+    assert not mock_upload.called
+
+    encoded_task_args = current_app.signing_client.encode(
+        {
+            "page_count": 2,
+            "message": "content-outside-printable-area",
+            "invalid_pages": [1, 2],
+            "validation_status": "failed",
+            "filename": "filename.pdf",
+            "notification_id": "abc-123",
+            "address": None,
+        }
+    )
+    mock_celery.assert_called_once_with(
+        args=(encoded_task_args,),
+        name="process-sanitised-letter",
+        queue="letter-tasks",
+    )
+
+
+def test_sanitise_and_merge_letter_parts_moves_sibling_scan_objects_to_invalid_bucket_on_failure(mocker, client):
+    mocker.patch(
+        "app.celery.tasks.s3download",
+        side_effect=[BytesIO(blank_with_address), BytesIO(no_colour), BytesIO(blank_page)],
+    )
+    mocker.patch("app.celery.tasks.s3upload")
+    mocker.patch("app.celery.tasks.notify_celery.send_task")
+    mock_copy = mocker.patch("app.celery.tasks.copy_s3_object")
+    mock_boto3 = mocker.patch("app.celery.tasks.boto3")
+
+    sanitise_and_merge_letter_parts("abc-123", ["filename.pdf", "filename.PART2.pdf", "filename.PART3.pdf"])
+
+    # part 2 failed its own sanitisation and part 3 was never even downloaded (part 2 already
+    # failed) - neither is seen by the (unmodified) process-sanitised-letter task downstream,
+    # which only ever knows about the canonical (part 0) filename, so both of their raw
+    # scan-bucket objects need to be moved out by this task itself so they aren't orphaned there
+    assert mock_copy.call_args_list == [
+        mocker.call(
+            current_app.config["LETTERS_SCAN_BUCKET_NAME"],
+            "filename.PART2.pdf",
+            current_app.config["INVALID_PDF_BUCKET_NAME"],
+            "filename.PART2.pdf",
+        ),
+        mocker.call(
+            current_app.config["LETTERS_SCAN_BUCKET_NAME"],
+            "filename.PART3.pdf",
+            current_app.config["INVALID_PDF_BUCKET_NAME"],
+            "filename.PART3.pdf",
+        ),
+    ]
+    assert mock_boto3.resource.return_value.Object.call_args_list == [
+        mocker.call(current_app.config["LETTERS_SCAN_BUCKET_NAME"], "filename.PART2.pdf"),
+        mocker.call(current_app.config["LETTERS_SCAN_BUCKET_NAME"], "filename.PART3.pdf"),
+    ]
+    assert mock_boto3.resource.return_value.Object.return_value.delete.call_count == 2
+
+
+def test_sanitise_and_merge_letter_parts_combined_page_count_over_limit_after_merge(mocker, client):
+    # 1 page + 10 pages = 11 pages, over LETTER_MAX_PAGE_COUNT (10), even though each part
+    # individually passes its own per-part page count check
+    mocker.patch("app.celery.tasks.s3download", side_effect=[BytesIO(b"raw-part-1"), BytesIO(b"raw-part-2")])
+    mocker.patch(
+        "app.celery.tasks.sanitise_file_contents",
+        side_effect=[
+            _sanitise_result(1, valid_letter, address="Queen Elizabeth\nBuckingham Palace\nLondon\nSW1 1AA"),
+            _sanitise_result(10, multi_page_pdf),
+        ],
+    )
+    mock_upload = mocker.patch("app.celery.tasks.s3upload")
+    mock_celery = mocker.patch("app.celery.tasks.notify_celery.send_task")
+    mocker.patch("app.celery.tasks.copy_s3_object")
+    mocker.patch("app.celery.tasks.boto3")
+
+    sanitise_and_merge_letter_parts("abc-123", ["filename.pdf", "filename.PART2.pdf"])
+
+    assert not mock_upload.called
+
+    encoded_task_args = current_app.signing_client.encode(
+        {
+            "page_count": 11,
+            "message": "letter-too-long",
+            "invalid_pages": None,
+            "validation_status": "failed",
+            "filename": "filename.pdf",
+            "notification_id": "abc-123",
+            # part 0 individually passed sanitisation (with a known address) before the
+            # post-merge page count check failed, so the address is still known here
+            "address": "Queen Elizabeth\nBuckingham Palace\nLondon\nSW1 1AA",
+        }
+    )
+    mock_celery.assert_called_once_with(
+        args=(encoded_task_args,),
+        name="process-sanitised-letter",
+        queue="letter-tasks",
+    )
+
+
+def test_sanitise_and_merge_letter_parts_raises_a_boto_error(mocker, client, caplog):
+    mocker.patch("app.celery.tasks.s3download", side_effect=BotoClientError({}, "operation-name"))
+    mock_upload = mocker.patch("app.celery.tasks.s3upload")
+    mock_celery = mocker.patch("app.celery.tasks.notify_celery.send_task")
+
+    with caplog.at_level(logging.ERROR):
+        sanitise_and_merge_letter_parts("abc-123", ["filename.pdf", "filename.PART2.pdf"])
+
+    assert not mock_upload.called
+    assert not mock_celery.called
+    assert any("Error downloading" in message for message in caplog.messages)
 
 
 @pytest.mark.skip(reason="[NOTIFYNL] AWS permissions break test.")
