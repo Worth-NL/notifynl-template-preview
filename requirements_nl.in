@@ -1,54 +1,26 @@
-# Celery libraries which are pinned for reasons
-celery[sqs]==5.6.0
-# Pin kombu to merge of PR #2342 (SQS fair queue / MessageGroupId support) until kombu 5.7 is released
-kombu @ git+https://github.com/celery/kombu.git@860e40a6c904c4d8551577d9f4e8c00f03b6e06c
-pycurl==7.45.7
+#app requirements
+celery[sqs]==5.4.0
+jsonschema==4.15.0
+Flask-WeasyPrint==1.0.0
+Flask-HTTPAuth==4.8.0
+sentry-sdk[flask,celery]==1.45.1
 
-# PDF libraries (manual testing needed to bump these)
-wand==0.6.13
-# pypdf kept ahead of upstream's cautious 3.13 pin - NL bumped past the printable-area
-# bug described below and hasn't hit it since
+# pdf libraries
+html5lib==1.1
+wand==0.5.9
+# pypdf can't be bumped past 3.13 until we figure out why it caused
 # https://govuk.zendesk.com/agent/tickets/5555290
 pypdf==6.9.2
-reportlab==4.4.9
-pdf2image==1.17.0
-PyMuPDF==1.24.11
-Flask-WeasyPrint==1.1.0
-WeasyPrint==68.1
-
-# Weasyprint subdependencies which are probably safe to bump but we can’t be sure
-pillow==12.2.0
-pydyf==0.11.0
-pyphen==0.12.0
-tinycss2==1.5.0
-fonttools==4.61.0
-cssselect2==0.8.0
-
-# Other miscellaneous dependencies
-jsonschema~=4.25
-Flask-HTTPAuth~=4.8
-sentry-sdk[flask,celery]~=1.45
+reportlab==3.6.13
+pdf2image==1.12.1
+PyMuPDF==1.24.4
+WeasyPrint==59
+# pydyf issue fix
+pydyf<0.9
 
 # Run `make bump-utils` to update to the latest version
-notifications-utils @ git+https://github.com/Worth-NL/notifynl-utils.git@101.1.20
+notifications-utils @ git+https://github.com/Worth-NL/notifynl-utils.git@101.1.15
 
+# gds-metrics requires prometheseus 0.2.0, override that requirement as 0.7.1 brings significant performance gains
+prometheus-client==0.14.1
 git+https://github.com/alphagov/gds_metrics_python.git@6f1840a57b6fb1ee40b7e84f2f18ec229de8aa72
-
-opentelemetry-distro[otlp]
-opentelemetry-instrumentation-asyncio
-opentelemetry-instrumentation-dbapi
-opentelemetry-instrumentation-logging
-opentelemetry-instrumentation-sqlite3
-opentelemetry-instrumentation-threading
-opentelemetry-instrumentation-urllib
-opentelemetry-instrumentation-wsgi
-opentelemetry-instrumentation-boto3sqs
-opentelemetry-instrumentation-botocore
-opentelemetry-instrumentation-celery
-opentelemetry-instrumentation-click
-opentelemetry-instrumentation-flask
-opentelemetry-instrumentation-grpc
-opentelemetry-instrumentation-jinja2
-opentelemetry-instrumentation-redis
-opentelemetry-instrumentation-requests
-opentelemetry-instrumentation-urllib3
