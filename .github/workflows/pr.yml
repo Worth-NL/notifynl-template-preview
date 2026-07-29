@@ -23,7 +23,7 @@ jobs:
 
     strategy:
       matrix:
-        python-version: ["3.11"]
+        python-version: ["3.13"]
 
     env:
       LETTER_LOGO_URL: ${{ secrets.LETTER_LOGO_URL }}
