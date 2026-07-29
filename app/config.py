@@ -41,6 +41,7 @@ class Config:
     CELERY_BEAT_LOG_LEVEL = os.getenv("CELERY_BEAT_LOG_LEVEL", "INFO").upper()
 
     NOTIFICATION_QUEUE_PREFIX = os.environ.get("NOTIFICATION_QUEUE_PREFIX")
+    ENABLE_SQS_MESSAGE_GROUP_IDS = os.environ.get("ENABLE_SQS_MESSAGE_GROUP_IDS", "1") == "1"
 
     AWS_ACCOUNT_ID = os.environ.get("AWS_ACCOUNT_ID", "123456789012")
     CELERY = {
@@ -54,7 +55,8 @@ class Config:
             "predefined_queues": QueueNames.predefined_queues(NOTIFICATION_QUEUE_PREFIX, AWS_REGION, AWS_ACCOUNT_ID),
         },
         "timezone": "Europe/London",
-        "worker_max_memory_per_child": 50,
+        "worker_max_memory_per_child": 256 * 1024,  # in KiB
+        "worker_max_tasks_per_child": 64,
         "imports": ["app.celery.tasks"],
         "task_queues": [
             Queue(
@@ -64,6 +66,9 @@ class Config:
             )
         ],
     }
+
+    if os.getenv("CELERYD_PREFETCH_MULTIPLIER"):
+        CELERY["worker_prefetch_multiplier"] = os.getenv("CELERYD_PREFETCH_MULTIPLIER", "2")
 
     NOTIFY_REQUEST_LOG_LEVEL = os.getenv("NOTIFY_REQUEST_LOG_LEVEL", "INFO")
 
@@ -136,6 +141,7 @@ class Test(Development):
 ################
 NL_PREFIX = "notifynl"
 
+
 class DevNL(Config):
     SERVER_NAME = os.getenv("SERVER_NAME")
     NOTIFY_ENVIRONMENT = "development"
@@ -148,7 +154,9 @@ class DevNL(Config):
     TEST_LETTERS_BUCKET_NAME = f"{NL_PREFIX}-{NOTIFY_ENVIRONMENT}-test-letters"
     INVALID_PDF_BUCKET_NAME = f"{NL_PREFIX}-{NOTIFY_ENVIRONMENT}-letters-invalid-pdf"
     SANITISED_LETTER_BUCKET_NAME = f"{NL_PREFIX}-{NOTIFY_ENVIRONMENT}-letters-sanitise"
-    PRECOMPILED_ORIGINALS_BACKUP_LETTER_BUCKET_NAME = f"{NL_PREFIX}-{NOTIFY_ENVIRONMENT}-letters-precompiled-originals-backup"  # noqa: E501
+    PRECOMPILED_ORIGINALS_BACKUP_LETTER_BUCKET_NAME = (
+        f"{NL_PREFIX}-{NOTIFY_ENVIRONMENT}-letters-precompiled-originals-backup"
+    )
     LETTER_ATTACHMENT_BUCKET_NAME = f"{NL_PREFIX}-{NOTIFY_ENVIRONMENT}-letter-attachments"
 
     CELERY = {
@@ -168,7 +176,9 @@ class TestNL(Config):
     TEST_LETTERS_BUCKET_NAME = f"{NL_PREFIX}-{NOTIFY_ENVIRONMENT}-test-letters"
     INVALID_PDF_BUCKET_NAME = f"{NL_PREFIX}-{NOTIFY_ENVIRONMENT}-letters-invalid-pdf"
     SANITISED_LETTER_BUCKET_NAME = f"{NL_PREFIX}-{NOTIFY_ENVIRONMENT}-letters-sanitise"
-    PRECOMPILED_ORIGINALS_BACKUP_LETTER_BUCKET_NAME = f"{NL_PREFIX}-{NOTIFY_ENVIRONMENT}-letters-precompiled-originals-backup"  # noqa: E501
+    PRECOMPILED_ORIGINALS_BACKUP_LETTER_BUCKET_NAME = (
+        f"{NL_PREFIX}-{NOTIFY_ENVIRONMENT}-letters-precompiled-originals-backup"
+    )
     LETTER_ATTACHMENT_BUCKET_NAME = f"{NL_PREFIX}-{NOTIFY_ENVIRONMENT}-letter-attachments"
 
     CELERY = {
@@ -188,7 +198,9 @@ class ProdNL(Config):
     TEST_LETTERS_BUCKET_NAME = f"{NL_PREFIX}-{NOTIFY_ENVIRONMENT}-test-letters"
     INVALID_PDF_BUCKET_NAME = f"{NL_PREFIX}-{NOTIFY_ENVIRONMENT}-letters-invalid-pdf"
     SANITISED_LETTER_BUCKET_NAME = f"{NL_PREFIX}-{NOTIFY_ENVIRONMENT}-letters-sanitise"
-    PRECOMPILED_ORIGINALS_BACKUP_LETTER_BUCKET_NAME = f"{NL_PREFIX}-{NOTIFY_ENVIRONMENT}-letters-precompiled-originals-backup"  # noqa: E501
+    PRECOMPILED_ORIGINALS_BACKUP_LETTER_BUCKET_NAME = (
+        f"{NL_PREFIX}-{NOTIFY_ENVIRONMENT}-letters-precompiled-originals-backup"
+    )
     LETTER_ATTACHMENT_BUCKET_NAME = f"{NL_PREFIX}-{NOTIFY_ENVIRONMENT}-letter-attachments"
 
     CELERY = {
@@ -199,9 +211,4 @@ class ProdNL(Config):
     }
 
 
-configs = {
-    "development": DevNL,
-    "test": Test,
-    "testnl": TestNL,
-    "production": ProdNL
-}
+configs = {"development": DevNL, "test": Test, "testnl": TestNL, "production": ProdNL}

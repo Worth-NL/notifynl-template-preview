@@ -12,6 +12,7 @@ valid_letter = file("tests/test_pdfs/valid_letter.pdf")
 blank_with_address = file("tests/test_pdfs/blank_with_address.pdf")
 already_has_notify_tag = file("tests/test_pdfs/already_has_notify_tag.pdf")
 address_with_unusual_coordinates = file("tests/test_pdfs/address_with_unusual_coordinates.pdf")
+content_up_to_boundary_edges = file("tests/test_pdfs/content_up_to_boundary_edges.pdf")
 
 # unable-to-read-file
 not_pdf = file("tests/test_pdfs/invalid-svg-file.svg")
@@ -37,6 +38,10 @@ repeated_address_block = file("tests/test_pdfs/repeated_address_block.pdf")
 # notify-tag-found-in-content
 notify_tag_on_first_page = file("tests/test_pdfs/notify_tag_on_first_page.pdf")
 notify_tags_on_page_2_and_4 = file("tests/test_pdfs/notify_tags_on_page_2_and_4.pdf")
+
+# invalid first two lines of the address
+invalid_address_line_1 = file("tests/test_pdfs/invalid_address_line_1.pdf")
+invalid_address_line_2 = file("tests/test_pdfs/invalid_address_line_2.pdf")
 
 # address-is-empty
 multi_page_pdf = file("tests/test_pdfs/multi_page_pdf.pdf")  # (10 pages long)
