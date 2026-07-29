@@ -56,6 +56,8 @@ jobs:
           uv pip install -r requirements_nl_test.txt
 
       - uses: astral-sh/ruff-action@v3
+        with:
+          version: "0.15.2"
 
       - name: Generate version file
         run: make generate-version-file
