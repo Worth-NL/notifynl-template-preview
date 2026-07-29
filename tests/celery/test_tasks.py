@@ -1,40 +1,26 @@
 import base64
 import logging
-import uuid
-from contextlib import contextmanager
-from datetime import UTC, datetime
 from io import BytesIO
-from unittest.mock import patch
 
 import boto3
 import pytest
 from botocore.exceptions import ClientError as BotoClientError
 from celery.exceptions import Retry
 from flask import current_app
-from moto import mock_aws
-from notifications_utils.template import LetterPrintTemplate
+from moto import mock_s3
 from pypdf import PdfReader
 
 import app.celery.tasks
 from app.celery.tasks import (
     _create_pdf_for_letter,
-    _prepare_pdf,
     _remove_folder_from_filename,
     create_pdf_for_templated_letter,
     recreate_pdf_for_precompiled_letter,
-    recreate_pdf_for_template_letter_attachments,
     sanitise_and_upload_letter,
 )
 from app.config import QueueNames
-from app.utils import get_transient_letter_file_location
 from app.weasyprint_hack import WeasyprintError
 from tests.pdf_consts import bad_postcode, blank_with_address, multi_page_pdf, no_colour
-
-
-@contextmanager
-def _with_message_group_id(value):
-    with patch("notifications_utils.celery.NotifyTask.message_group_id", new=value, create=True):
-        yield
 
 
 @pytest.mark.skip(reason="[NOTIFYNL] Bucket name issues")
@@ -46,8 +32,7 @@ def test_sanitise_and_upload_valid_letter(mocker, client):
     mock_celery = mocker.patch("app.celery.tasks.notify_celery.send_task")
     mock_backup_original = mocker.patch("app.celery.tasks.copy_s3_object")
 
-    with _with_message_group_id("test-message-group-id"):
-        sanitise_and_upload_letter("abc-123", "filename.pdf")
+    sanitise_and_upload_letter("abc-123", "filename.pdf")
 
     mock_upload.assert_called_once_with(
         filedata=mocker.ANY,
@@ -72,7 +57,6 @@ def test_sanitise_and_upload_valid_letter(mocker, client):
         args=(encoded_task_args,),
         name="process-sanitised-letter",
         queue="letter-tasks",
-        MessageGroupId="test-message-group-id",
     )
 
     mock_backup_original.assert_called_once_with(
@@ -90,8 +74,7 @@ def test_sanitise_invalid_letter(mocker, client):
     mock_upload = mocker.patch("app.celery.tasks.s3upload")
     mock_celery = mocker.patch("app.celery.tasks.notify_celery.send_task")
 
-    with _with_message_group_id("test-message-group-id"):
-        sanitise_and_upload_letter("abc-123", "filename.pdf")
+    sanitise_and_upload_letter("abc-123", "filename.pdf")
 
     encoded_task_args = current_app.signing_client.encode(
         {
@@ -110,7 +93,6 @@ def test_sanitise_invalid_letter(mocker, client):
         args=(encoded_task_args,),
         name="process-sanitised-letter",
         queue="letter-tasks",
-        MessageGroupId="test-message-group-id",
     )
 
 
@@ -133,8 +115,7 @@ def test_sanitise_international_letters(
     mock_upload = mocker.patch("app.celery.tasks.s3upload")
     mock_celery = mocker.patch("app.celery.tasks.notify_celery.send_task")
 
-    with _with_message_group_id("test-message-group-id"):
-        sanitise_and_upload_letter("abc-123", "filename.pdf", **extra_args)
+    sanitise_and_upload_letter("abc-123", "filename.pdf", **extra_args)
 
     encoded_task_args = current_app.signing_client.encode(
         {
@@ -153,7 +134,6 @@ def test_sanitise_international_letters(
         args=(encoded_task_args,),
         name="process-sanitised-letter",
         queue="letter-tasks",
-        MessageGroupId="test-message-group-id",
     )
 
 
@@ -178,27 +158,10 @@ def test_sanitise_and_upload_letter_raises_a_boto_error(mocker, client, caplog):
 
 
 @pytest.mark.skip(reason="[NOTIFYNL] AWS permissions break test.")
-@pytest.mark.parametrize(
-    "logo_filename, expected_logo_filename_value",
-    (
-        ("hm-government", "hm-government.svg"),
-        (None, None),
-    ),
-)
+@pytest.mark.parametrize("logo_filename", ["hm-government", None])
 @pytest.mark.parametrize(
     "key_type,bucket_name",
-    [
-        ("test", "TEST_LETTERS_BUCKET_NAME"),
-        ("normal", "LETTERS_PDF_BUCKET_NAME"),
-    ],
-)
-@pytest.mark.parametrize(
-    "date_argument, expected_date_value",
-    (
-        ({}, None),
-        ({"date": None}, None),
-        ({"date": "2026-02-06T01:02:03.000000+00:00"}, datetime(2026, 2, 6, 1, 2, 3, tzinfo=UTC)),
-    ),
+    [("test", "TEST_LETTERS_BUCKET_NAME"), ("normal", "LETTERS_PDF_BUCKET_NAME")],
 )
 def test_create_pdf_for_templated_letter_happy_path(
     mocker,
@@ -207,52 +170,20 @@ def test_create_pdf_for_templated_letter_happy_path(
     key_type,
     bucket_name,
     logo_filename,
-    expected_logo_filename_value,
-    date_argument,
-    expected_date_value,
     caplog,
 ):
     # create a pdf for templated letter using data from API, upload the pdf to the final S3 bucket,
     # and send data back to API so that it can update notification status and billable units.
     mock_upload = mocker.patch("app.celery.tasks.s3upload")
     mock_celery = mocker.patch("app.celery.tasks.notify_celery.send_task")
-    mock_utils_template = mocker.patch("app.celery.tasks.LetterPrintTemplate", wraps=LetterPrintTemplate)
 
     data_for_create_pdf_for_templated_letter_task["logo_filename"] = logo_filename
     data_for_create_pdf_for_templated_letter_task["key_type"] = key_type
-    data_for_create_pdf_for_templated_letter_task |= date_argument
 
     encoded_data = current_app.signing_client.encode(data_for_create_pdf_for_templated_letter_task)
 
-    with (
-        caplog.at_level(logging.INFO),
-        _with_message_group_id("test-message-group-id"),
-    ):
+    with caplog.at_level(logging.INFO):
         create_pdf_for_templated_letter(encoded_data)
-
-    mock_utils_template.assert_called_once_with(
-        {
-            "id": 1,
-            "template_type": "letter",
-            "letter_languages": "english",
-            "subject": "letter subject",
-            "content": "letter content with ((placeholder))",
-            "letter_welsh_subject": None,
-            "letter_welsh_content": None,
-            "updated_at": "2017-08-01",
-            "version": 1,
-            "service": "1234",
-        },
-        values={
-            "placeholder": "abc",
-        },
-        contact_block="123",
-        admin_base_url="https://static-logos.notify.tools/letters",
-        logo_file_name=expected_logo_filename_value,
-        language="english",
-        includes_first_page=True,
-        date=expected_date_value,
-    )
 
     mock_upload.assert_called_once_with(
         filedata=mocker.ANY,
@@ -266,7 +197,6 @@ def test_create_pdf_for_templated_letter_happy_path(
         kwargs={"notification_id": "abc-123", "page_count": 1},
         name="update-billable-units-for-letter",
         queue="letter-tasks",
-        MessageGroupId="test-message-group-id",
     )
     assert "Creating a pdf for notification with id abc-123" in caplog.messages
     assert (
@@ -292,10 +222,7 @@ def test_create_pdf_for_templated_letter_includes_welsh_pages_if_provided(
 
     encoded_data = current_app.signing_client.encode(welsh_data_for_create_pdf_for_templated_letter_task)
 
-    with (
-        caplog.at_level(logging.INFO),
-        _with_message_group_id("test-message-group-id"),
-    ):
+    with caplog.at_level(logging.INFO):
         create_pdf_for_templated_letter(encoded_data)
 
     mock_upload.assert_called_once_with(
@@ -310,7 +237,6 @@ def test_create_pdf_for_templated_letter_includes_welsh_pages_if_provided(
         kwargs={"notification_id": "abc-123", "page_count": 2},
         name="update-billable-units-for-letter",
         queue="letter-tasks",
-        MessageGroupId="test-message-group-id",
     )
     assert "Creating a pdf for notification with id abc-123" in caplog.messages
     assert (
@@ -395,10 +321,7 @@ def test_create_pdf_for_templated_letter_boto_error(
 
     encoded_data = current_app.signing_client.encode(data_for_create_pdf_for_templated_letter_task)
 
-    with (
-        caplog.at_level(logging.INFO),
-        _with_message_group_id("test-message-group-id"),
-    ):
+    with caplog.at_level(logging.INFO):
         create_pdf_for_templated_letter(encoded_data)
 
     assert not mock_celery.called
@@ -422,7 +345,7 @@ def test_create_pdf_for_templated_letter_when_letter_is_too_long(
 
     encoded_data = current_app.signing_client.encode(data_for_create_pdf_for_templated_letter_task)
 
-    with caplog.at_level(logging.INFO), _with_message_group_id("test-message-group-id"):
+    with caplog.at_level(logging.INFO):
         create_pdf_for_templated_letter(encoded_data)
 
     mock_upload.assert_called_once_with(
@@ -441,7 +364,6 @@ def test_create_pdf_for_templated_letter_when_letter_is_too_long(
         kwargs={"notification_id": "abc-123", "page_count": 11},
         name="update-validation-failed-for-templated-letter",
         queue="letter-tasks",
-        MessageGroupId="test-message-group-id",
     )
     assert "Creating a pdf for notification with id abc-123" in caplog.messages
     assert (
@@ -468,7 +390,7 @@ def test_create_pdf_for_templated_letter_html_error(mocker, data_for_create_pdf_
 
 
 @pytest.mark.skip(reason="[NOTIFYNL] Bucket name issues")
-@mock_aws
+@mock_s3
 def test_recreate_pdf_for_precompiled_letter(mocker, client):
     # create backup S3 bucket and an S3 bucket for the final letters that will be sent to DVLA
     conn = boto3.resource("s3", region_name=current_app.config["AWS_REGION"])
@@ -511,7 +433,7 @@ def test_recreate_pdf_for_precompiled_letter(mocker, client):
     assert base64.b64decode(sanitise_spy.spy_return["file"].encode()) == sanitised_file_contents
 
 
-@mock_aws
+@mock_s3
 def test_recreate_pdf_for_precompiled_letter_with_s3_error(client, caplog):
     # create the backup S3 bucket, which is empty so will cause an error when attempting to download the file
     conn = boto3.resource("s3", region_name=current_app.config["AWS_REGION"])
@@ -529,7 +451,7 @@ def test_recreate_pdf_for_precompiled_letter_with_s3_error(client, caplog):
     )
 
 
-@mock_aws
+@mock_s3
 def test_recreate_pdf_for_precompiled_letter_that_fails_validation(client, caplog):
     # create backup S3 bucket and an S3 bucket for the final letters that will be sent to DVLA
     conn = boto3.resource("s3", region_name=current_app.config["AWS_REGION"])
@@ -588,146 +510,3 @@ def test_create_pdf_for_letter_notify_tagging(client, includes_first_page):
     )
 
     assert ("NOTIFY" in PdfReader(pdf).pages[0].extract_text()) is includes_first_page
-
-
-@pytest.mark.parametrize(
-    "letter_content",
-    [
-        {"language": "English", "content": "My favourite animal is a cat."},
-        {"language": "Urdu", "content": "میرا پسندیدہ جانور ایک بلی ہے۔"},
-        {"language": "Ukrainian", "content": "Моя улюблена тварина - кіт."},
-        {"language": "Polish", "content": "Moim ulubionym zwierzęciem jest kot."},
-        {"language": "Romanian", "content": "Animalul meu preferat este o pisică."},
-        {"language": "Latvian", "content": "Mans mīļākais dzīvnieks ir kaķis."},
-        {"language": "Chinese (Simplified)", "content": "我最喜欢的动物是猫。"},
-        {"language": "Arabic", "content": "حيواني المفضل هو القط."},
-        {"language": "Hindi", "content": "मेरा पसंदीदा जानवर एक बिल्ली है।"},
-        {"language": "Punjabi (Gurmukhi script)", "content": "ਮੇਰਾ ਮਨਪਸੰਦ ਜਾਨਵਰ ਇੱਕ ਬਿੱਲੀ ਹੈ।"},
-        {"language": "Bangla", "content": "আমার প্রিয় প্রাণী একটি বিড়াল।"},
-        {"language": "Tamil", "content": "எனது பிடித்த விலங்கு ஒரு பூனை."},
-        {"language": "Telugu", "content": "నా ఇష్టమైన జంతువు ఒక పిల్లి."},
-        {"language": "Gujarati", "content": "મારું મનપસંદ પ્રાણી એક બિલાડી છે."},
-        {"language": "Marathi", "content": "माझं आवडतं प्राणी एक मांजर आहे."},
-        {"language": "Kannada", "content": "ನನ್ನ ಪ್ರಿಯ ಪ್ರಾಣಿ ಒಂದು ಬೆಕ್ಕು."},
-        {"language": "Hebrew", "content": "החיה האהובה עלי היא חתול."},
-        {"language": "Greek", "content": "Το αγαπημένο μου ζώο είναι μια γάτα."},
-        {"language": "Russian", "content": "Мое любимое животное - кот."},
-    ],
-    ids=lambda x: x["language"],
-)
-def test_cmyk_pdf_with_multiple_languages_for_letter_notify_tagging(client, letter_content):
-    pdf = _prepare_pdf(
-        self=None,
-        letter_details={
-            "template": {"template_type": "letter", "subject": "subject", "content": letter_content["content"]},
-            "values": {},
-            "letter_contact_block": "",
-            "logo_filename": "",
-        },
-    )
-
-    assert "NOTIFY" in PdfReader(pdf).pages[0].extract_text()
-
-
-@mock_aws
-def test_recreate_pdf_for_template_letter_attachments(mocker, client):
-    # create backup S3 bucket and an S3 bucket for the sanitised attachment letters
-    conn = boto3.resource("s3", region_name=current_app.config["AWS_REGION"])
-    backup_bucket = conn.create_bucket(
-        Bucket=current_app.config["PRECOMPILED_ORIGINALS_BACKUP_LETTER_BUCKET_NAME"],
-        CreateBucketConfiguration={"LocationConstraint": "eu-west-1"},
-    )
-    final_letters_bucket = conn.create_bucket(
-        Bucket=current_app.config["LETTER_ATTACHMENT_BUCKET_NAME"],
-        CreateBucketConfiguration={"LocationConstraint": "eu-west-1"},
-    )
-
-    service_id = str(uuid.uuid4())
-    attachment_id = str(uuid.uuid4())
-
-    # put a valid PDF in the backup S3 bucket
-    valid_file = BytesIO(blank_with_address)
-    s3 = boto3.client("s3", region_name="eu-west-1")
-    s3.put_object(
-        Bucket=current_app.config["PRECOMPILED_ORIGINALS_BACKUP_LETTER_BUCKET_NAME"],
-        Key=f"{attachment_id}.pdf",
-        Body=valid_file.read(),
-    )
-
-    sanitise_spy = mocker.spy(app.celery.tasks, "sanitise_file_contents")
-
-    recreate_pdf_for_template_letter_attachments(service_id, attachment_id, "1234-abcd.pdf")
-
-    # backup PDF still exists in the backup bucket
-    assert [o.key for o in backup_bucket.objects.all()] == [f"{attachment_id}.pdf"]
-    # the final letters bucket contains the recreated PDF
-    assert [o.key for o in final_letters_bucket.objects.all()] == [
-        get_transient_letter_file_location(service_id, attachment_id)
-    ]
-
-    # Check that the file in the final letters bucket has been through the `sanitise_file_contents` function
-    sanitised_file_contents = (
-        conn.Object(
-            current_app.config["LETTER_ATTACHMENT_BUCKET_NAME"],
-            get_transient_letter_file_location(service_id, attachment_id),
-        )
-        .get()["Body"]
-        .read()
-    )
-    assert base64.b64decode(sanitise_spy.spy_return["file"].encode()) == sanitised_file_contents
-
-
-@mock_aws
-def test_recreate_pdf_for_template_letter_attachments_with_s3_error(client, caplog):
-    # create the backup S3 bucket, which is empty so will cause an error when attempting to download the file
-    conn = boto3.resource("s3", region_name=current_app.config["AWS_REGION"])
-    conn.create_bucket(
-        Bucket=current_app.config["PRECOMPILED_ORIGINALS_BACKUP_LETTER_BUCKET_NAME"],
-        CreateBucketConfiguration={"LocationConstraint": "eu-west-1"},
-    )
-
-    service_id = str(uuid.uuid4())
-    attachment_id = str(uuid.uuid4())
-
-    with caplog.at_level(logging.ERROR):
-        recreate_pdf_for_template_letter_attachments(service_id, attachment_id, "1234-abcd.pdf")
-
-    assert (
-        f"Error downloading file from backup bucket or uploading to letters-attachment bucket for "
-        f"attachment {attachment_id}"
-    ) in caplog.messages
-
-
-@mock_aws
-def test_recreate_pdf_for_template_letter_attachments_that_fails_validation(client, caplog):
-    # create backup S3 bucket and an S3 bucket for the sanitised attachment letters
-    conn = boto3.resource("s3", region_name=current_app.config["AWS_REGION"])
-    backup_bucket = conn.create_bucket(
-        Bucket=current_app.config["PRECOMPILED_ORIGINALS_BACKUP_LETTER_BUCKET_NAME"],
-        CreateBucketConfiguration={"LocationConstraint": "eu-west-1"},
-    )
-    final_letters_bucket = conn.create_bucket(
-        Bucket=current_app.config["LETTER_ATTACHMENT_BUCKET_NAME"],
-        CreateBucketConfiguration={"LocationConstraint": "eu-west-1"},
-    )
-
-    service_id = str(uuid.uuid4())
-    attachment_id = str(uuid.uuid4())
-
-    # put an invalid PDF in the backup S3 bucket so that it fails sanitisation
-    invalid_file = BytesIO(no_colour)
-    s3 = boto3.client("s3", region_name="eu-west-1")
-    s3.put_object(
-        Bucket=current_app.config["PRECOMPILED_ORIGINALS_BACKUP_LETTER_BUCKET_NAME"],
-        Key=f"{attachment_id}.pdf",
-        Body=invalid_file.read(),
-    )
-
-    with caplog.at_level(logging.ERROR):
-        recreate_pdf_for_template_letter_attachments(service_id, attachment_id, "1234-abcd.pdf")
-
-    # the original file has not been copied or moved
-    assert [o.key for o in backup_bucket.objects.all()] == [f"{attachment_id}.pdf"]
-    assert len(list(final_letters_bucket.objects.all())) == 0
-
-    assert f"Attachment failed resanitisation id: {attachment_id}" in caplog.messages

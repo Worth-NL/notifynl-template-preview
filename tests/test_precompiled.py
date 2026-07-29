@@ -38,13 +38,10 @@ from tests.pdf_consts import (
     blank_with_2_line_address,
     blank_with_8_line_address,
     blank_with_address,
-    content_up_to_boundary_edges,
     example_dwp_pdf,
     hackney_sample,
     international_bfpo,
     invalid_address_character,
-    invalid_address_line_1,
-    invalid_address_line_2,
     landscape_oriented_page,
     landscape_rotated_page,
     multi_page_pdf,
@@ -327,14 +324,6 @@ def test_get_invalid_pages_is_ok_with_landscape_pages_that_are_rotated(client):
 @pytest.mark.skip(reason="[NOTIFYNL] Broken by validation change")
 def test_get_invalid_pages_ignores_notify_tags_on_page_1(client):
     message, invalid_pages = get_invalid_pages_with_message(BytesIO(already_has_notify_tag))
-    assert message == ""
-    assert invalid_pages == []
-
-
-def test_get_invalid_pages_content_up_to_boundary_edges(client):
-    # This uses a 1 page PDF that has colour filling all of the printable areas to test for unintentional
-    # changes to the valid boundaries
-    message, invalid_pages = get_invalid_pages_with_message(BytesIO(content_up_to_boundary_edges))
     assert message == ""
     assert invalid_pages == []
 
@@ -655,8 +644,6 @@ def test_sanitise_precompiled_letter_with_missing_or_wrong_address_ok_for_an_att
         (invalid_address_character, "", "invalid-char-in-address"),
         (no_fixed_abode, "", "no-fixed-abode-address"),
         (international_bfpo, "", "has-country-for-bfpo-address"),
-        (invalid_address_line_1, "", "invalid-address-line-1-or-2"),
-        (invalid_address_line_2, "", "invalid-address-line-1-or-2"),
     ),
 )
 def test_sanitise_precompiled_letter_with_bad_address_returns_400(
@@ -872,7 +859,7 @@ def test_sanitise_file_contents_on_pdf_with_no_resources_on_one_of_the_pages_con
             logging.WARNING,
             (
                 "template-preview post-sanitise filesize too big: filename=foo.pdf, "
-                "orig_size=1000KiB, new_size=1600KiB, pct_bigger=60%"
+                "orig_size=1000Kb, new_size=1600Kb, pct_bigger=60%"
             ),
         ),
         (
@@ -881,7 +868,7 @@ def test_sanitise_file_contents_on_pdf_with_no_resources_on_one_of_the_pages_con
             logging.ERROR,
             (
                 "template-preview post-sanitise filesize too big: filename=foo.pdf, "
-                "orig_size=1000KiB, new_size=2100KiB, over max_filesize=2MiB"
+                "orig_size=1000Kb, new_size=2100Kb, over max_filesize=2Mb"
             ),
         ),
         (
@@ -890,7 +877,7 @@ def test_sanitise_file_contents_on_pdf_with_no_resources_on_one_of_the_pages_con
             logging.ERROR,
             (
                 "template-preview post-sanitise filesize too big: filename=foo.pdf, "
-                "orig_size=1800KiB, new_size=2100KiB, over max_filesize=2MiB"
+                "orig_size=1800Kb, new_size=2100Kb, over max_filesize=2Mb"
             ),
         ),
     ],
