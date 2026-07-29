@@ -255,6 +255,11 @@ def test_get_invalid_pages_second_page(x, y, expected_failed, client):
         #     ("content-outside-printable-area", [1]),
         # ),  # under the logo
         (24.6 * mm, (297 - 39) * mm, 2, ("", [])),  # Same place on page 2 should be ok
+        # [NOTIFYNL] regression test for the gap between LOGO_BOTTOM_FROM_TOP_OF_PAGE and
+        # ADDRESS_TOP_FROM_TOP_OF_PAGE left uncovered between the 2025-10-02 margin change
+        # and now - LOGO_BOTTOM_FROM_TOP_OF_PAGE now equals ADDRESS_TOP_FROM_TOP_OF_PAGE, so
+        # this point (45mm from top, between the old logo/address boundaries) is covered.
+        (24.6 * mm, (297 - 45) * mm, 1, ("", [])),
         (0, 0, 2, ("content-outside-printable-area", [2])),
         (200, 200, 2, ("", [])),
         (590, 830, 2, ("content-outside-printable-area", [2])),
@@ -853,10 +858,13 @@ def test_sanitise_file_contents_on_pdf_with_no_resources_on_one_of_the_pages_con
         headers={"Content-type": "application/json", **auth_header},
     )
 
+    # [NOTIFYNL] message changed from "content-outside-printable-area" to "not-enough-address-lines"
+    # after closing the LOGO_BOTTOM/ADDRESS_TOP overlay gap - this PDF is still correctly rejected,
+    # just by a later validation step now that the gap-triggered false rejection no longer fires first.
     assert response.json == {
         "recipient_address": None,
         "page_count": 3,
-        "message": "content-outside-printable-area",
+        "message": "not-enough-address-lines",
         "invalid_pages": [1],
         "file": None,
     }

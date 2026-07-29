@@ -85,7 +85,11 @@ ADDRESS_BOUNDING_BOX = fitz.Rect(
 LOGO_LEFT_FROM_LEFT_OF_PAGE = BORDER_LEFT_FROM_LEFT_OF_PAGE
 LOGO_RIGHT_FROM_LEFT_OF_PAGE = SERVICE_ADDRESS_LEFT_FROM_LEFT_OF_PAGE
 LOGO_TOP_FROM_TOP_OF_PAGE = BORDER_TOP_FROM_TOP_OF_PAGE
-LOGO_BOTTOM_FROM_TOP_OF_PAGE = 40.00
+# [NOTIFYNL] must equal ADDRESS_TOP_FROM_TOP_OF_PAGE so the logo overlay meets the address
+# overlay with no gap between them (see _overlay_printable_areas_with_white's docstring:
+# "Logo is the area above the address area"). Left at 40 (< ADDRESS_TOP=50) between the
+# 2025-10-02 margin change and now, which left an uncovered strip between the two overlays.
+LOGO_BOTTOM_FROM_TOP_OF_PAGE = ADDRESS_TOP_FROM_TOP_OF_PAGE
 
 A4_HEIGHT_IN_PTS = A4_HEIGHT * mm
 
