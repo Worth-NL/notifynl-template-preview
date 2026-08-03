@@ -16,6 +16,7 @@ from notifications_utils.template import LetterPrintTemplate
 from pypdf import PdfReader
 
 import app.celery.tasks
+from app import ValidationFailed
 from app.celery.tasks import (
     _create_pdf_for_letter,
     _prepare_pdf,
@@ -577,8 +578,8 @@ def test_create_pdf_for_templated_letter_adds_letter_attachment_if_provided(
     mock_upload = mocker.patch("app.celery.tasks.s3upload")
     mock_celery = mocker.patch("app.celery.tasks.notify_celery.send_task")
     mock_convert_pdf_to_cmyk = mocker.patch("app.templated.convert_pdf_to_cmyk")
-    mock_add_attachment = mocker.patch(
-        "app.templated.add_attachment_to_letter",
+    mock_add_attachments = mocker.patch(
+        "app.templated.add_attachments_to_letter",
         return_value=BytesIO(multi_page_pdf),
     )
 
@@ -588,18 +589,105 @@ def test_create_pdf_for_templated_letter_adds_letter_attachment_if_provided(
 
     create_pdf_for_templated_letter(encoded_data)
 
-    mock_add_attachment.assert_called_once_with(
+    mock_add_attachments.assert_called_once_with(
         service_id="1234",
         templated_letter_pdf=mock_convert_pdf_to_cmyk.return_value,
-        attachment_object=data_for_create_pdf_for_templated_letter_task["template"]["letter_attachment"],
+        fixed_attachment=data_for_create_pdf_for_templated_letter_task["template"]["letter_attachment"],
+        adhoc_attachment_pdfs=[],
     )
 
-    assert mock_upload.call_args.kwargs["filedata"] == mock_add_attachment.return_value
-    # make sure we're recalculating the page count from the return value of add_attachment
+    assert mock_upload.call_args.kwargs["filedata"] == mock_add_attachments.return_value
+    # make sure we're recalculating the page count from the return value of add_attachments_to_letter
     # rather than just adding the letter_attachment["page_count"] value or anything
     # (multi_page_pdf is 10 pages long)
     assert mock_celery.call_args.kwargs["kwargs"]["page_count"] == 10
     assert mock_celery.call_args.kwargs["name"] == "update-billable-units-for-letter"
+
+
+def test_create_pdf_for_templated_letter_merges_adhoc_attachments_for_test_key(
+    mocker, client, data_for_create_pdf_for_templated_letter_task
+):
+    mock_upload = mocker.patch("app.celery.tasks.s3upload")
+    mocker.patch("app.celery.tasks.notify_celery.send_task")
+    mock_sanitise = mocker.patch("app.precompiled.sanitise_file_contents")
+    mocker.patch("app.letter_attachments.s3download", return_value=BytesIO(blank_page))
+    mock_boto3 = mocker.patch("app.celery.tasks.boto3")
+
+    data_for_create_pdf_for_templated_letter_task["key_type"] = "test"
+    data_for_create_pdf_for_templated_letter_task["attachments"] = ["abc-123/attachment-1.pdf"]
+
+    encoded_data = current_app.signing_client.encode(data_for_create_pdf_for_templated_letter_task)
+
+    create_pdf_for_templated_letter(encoded_data)
+
+    # test-key sends skip AV/sanitisation entirely for ad-hoc attachments, but the scanned
+    # attachment is still cleaned up from the scan bucket like a real send
+    assert not mock_sanitise.called
+    merged_pdf = PdfReader(mock_upload.call_args.kwargs["filedata"])
+    assert len(merged_pdf.pages) == 2  # templated letter (1 page) + ad-hoc attachment (1 page)
+    mock_boto3.resource.return_value.Object.assert_called_once_with(
+        current_app.config["LETTERS_SCAN_BUCKET_NAME"], "abc-123/attachment-1.pdf"
+    )
+    mock_boto3.resource.return_value.Object.return_value.delete.assert_called_once()
+
+
+def test_create_pdf_for_templated_letter_sanitises_merges_and_cleans_up_adhoc_attachments(
+    mocker, client, data_for_create_pdf_for_templated_letter_task
+):
+    mock_upload = mocker.patch("app.celery.tasks.s3upload")
+    mocker.patch("app.celery.tasks.notify_celery.send_task")
+    mock_sanitise = mocker.patch(
+        "app.precompiled.sanitise_file_contents",
+        side_effect=[_sanitise_result(1, blank_page), _sanitise_result(1, blank_page)],
+    )
+    mocker.patch("app.letter_attachments.s3download", return_value=BytesIO(b"raw-bytes"))
+    mock_boto3 = mocker.patch("app.celery.tasks.boto3")
+
+    data_for_create_pdf_for_templated_letter_task["attachments"] = [
+        "abc-123/attachment-1.pdf",
+        "abc-123/attachment-2.pdf",
+    ]
+
+    encoded_data = current_app.signing_client.encode(data_for_create_pdf_for_templated_letter_task)
+
+    create_pdf_for_templated_letter(encoded_data)
+
+    assert mock_sanitise.call_count == 2
+    merged_pdf = PdfReader(mock_upload.call_args.kwargs["filedata"])
+    assert len(merged_pdf.pages) == 3  # templated letter (1 page) + 2 ad-hoc attachments (1 page each)
+
+    assert mock_boto3.resource.return_value.Object.call_args_list == [
+        mocker.call(current_app.config["LETTERS_SCAN_BUCKET_NAME"], "abc-123/attachment-1.pdf"),
+        mocker.call(current_app.config["LETTERS_SCAN_BUCKET_NAME"], "abc-123/attachment-2.pdf"),
+    ]
+    assert mock_boto3.resource.return_value.Object.return_value.delete.call_count == 2
+
+
+def test_create_pdf_for_templated_letter_dispatches_validation_failed_for_bad_adhoc_attachment(
+    mocker, client, data_for_create_pdf_for_templated_letter_task, caplog
+):
+    mocker.patch(
+        "app.celery.tasks._prepare_pdf",
+        side_effect=ValidationFailed("content-outside-printable-area", [1], page_count=2),
+    )
+    mock_upload = mocker.patch("app.celery.tasks.s3upload")
+    mock_celery = mocker.patch("app.celery.tasks.notify_celery.send_task")
+
+    data_for_create_pdf_for_templated_letter_task["attachments"] = ["abc-123/attachment-1.pdf"]
+
+    encoded_data = current_app.signing_client.encode(data_for_create_pdf_for_templated_letter_task)
+
+    with caplog.at_level(logging.WARNING), _with_message_group_id("test-message-group-id"):
+        create_pdf_for_templated_letter(encoded_data)
+
+    assert not mock_upload.called
+    mock_celery.assert_called_once_with(
+        kwargs={"notification_id": "abc-123", "page_count": 2},
+        name="update-validation-failed-for-templated-letter",
+        queue="letter-tasks",
+        MessageGroupId="test-message-group-id",
+    )
+    assert any("Ad-hoc attachment validation failed" in message for message in caplog.messages)
 
 
 def test_create_pdf_for_templated_letter_errors_if_attachment_pushes_over_page_count(

@@ -1,7 +1,7 @@
 from collections.abc import Callable
 from io import BytesIO
 
-from app.letter_attachments import add_attachment_to_letter
+from app.letter_attachments import add_attachments_to_letter, get_adhoc_attachment_pdfs
 from app.transformation import convert_pdf_to_cmyk
 from app.utils import PDFPurpose, stitch_pdfs
 
@@ -25,11 +25,26 @@ def generate_templated_pdf(
         pdf = convert_pdf_to_cmyk(pdf)
         pdf.seek(0)
 
-    # Letter attachments are passed through `/precompiled/sanitise` endpoint, so already in CMYK.
-    if letter_attachment := letter_details["template"].get("letter_attachment"):
-        pdf = add_attachment_to_letter(
+    fixed_attachment = letter_details["template"].get("letter_attachment")
+    adhoc_attachment_keys = letter_details.get("attachments", [])
+
+    if fixed_attachment or adhoc_attachment_keys:
+        adhoc_attachment_pdfs = (
+            get_adhoc_attachment_pdfs(
+                adhoc_attachment_keys,
+                is_test_key=letter_details["key_type"] == "test",
+                allow_international_letters=letter_details.get("allow_international_letters", False),
+            )
+            if adhoc_attachment_keys
+            else []
+        )
+        # The fixed attachment is passed through `/precompiled/sanitise` endpoint at
+        # upload time; ad-hoc attachments are sanitised just above; both are already in
+        # CMYK by the time they reach here.
+        pdf = add_attachments_to_letter(
             service_id=letter_details["template"]["service"],
             templated_letter_pdf=pdf,
-            attachment_object=letter_attachment,
+            fixed_attachment=fixed_attachment,
+            adhoc_attachment_pdfs=adhoc_attachment_pdfs,
         )
     return pdf

@@ -14,7 +14,7 @@ from notifications_utils.pdf import is_letter_too_long, pdf_page_count
 from notifications_utils.s3 import s3download, s3upload
 from notifications_utils.template import LetterPrintTemplate
 
-from app import notify_celery
+from app import ValidationFailed, notify_celery
 from app.config import QueueNames, TaskNames, TaskNamesNL
 from app.precompiled import sanitise_file_contents
 from app.preview import get_page_count_for_pdf
@@ -303,7 +303,21 @@ def create_pdf_for_templated_letter(self: Task, encoded_letter_data):
         extra={"notification_id": letter_details["notification_id"]},
     )
 
-    cmyk_pdf = _prepare_pdf(letter_details, self)
+    try:
+        cmyk_pdf = _prepare_pdf(letter_details, self)
+    except ValidationFailed as exc:
+        current_app.logger.warning(
+            "Ad-hoc attachment validation failed for notification %s: %s",
+            letter_details["notification_id"],
+            exc.message,
+        )
+        _dispatch_letter_pdf_outcome(
+            self,
+            letter_details["notification_id"],
+            TaskNames.UPDATE_VALIDATION_FAILED_FOR_TEMPLATED_LETTER,
+            exc.page_count,
+        )
+        return
 
     page_count = get_page_count_for_pdf(cmyk_pdf)
     cmyk_pdf.seek(0)
@@ -353,15 +367,28 @@ def create_pdf_for_templated_letter(self: Task, encoded_letter_data):
         )
         return
 
+    _dispatch_letter_pdf_outcome(self, letter_details["notification_id"], task_name, page_count)
+
+    if letter_details.get("attachments"):
+        _cleanup_letter_attachment_scan_objects(letter_details["attachments"])
+
+
+def _dispatch_letter_pdf_outcome(self, notification_id, task_name, page_count):
     notify_celery.send_task(
         name=task_name,
         kwargs={
-            "notification_id": letter_details["notification_id"],
+            "notification_id": notification_id,
             "page_count": page_count,
         },
         queue=QueueNames.LETTERS,
         MessageGroupId=self.message_group_id,
     )
+
+
+def _cleanup_letter_attachment_scan_objects(attachment_keys):
+    s3 = boto3.resource("s3")
+    for key in attachment_keys:
+        s3.Object(current_app.config["LETTERS_SCAN_BUCKET_NAME"], key).delete()
 
 
 def _prepare_pdf(letter_details, self):
