@@ -203,11 +203,24 @@ def test_sanitise_and_merge_letter_parts_merges_two_parts_in_order(mocker, clien
     )
     mock_upload = mocker.patch("app.celery.tasks.s3upload")
     mock_celery = mocker.patch("app.celery.tasks.notify_celery.send_task")
-    mocker.patch("app.celery.tasks.copy_s3_object")
+    mock_copy_s3_object = mocker.patch("app.celery.tasks.copy_s3_object")
+    mock_boto3 = mocker.patch("app.celery.tasks.boto3")
 
     sanitise_and_merge_letter_parts("abc-123", ["filename.pdf", "filename.PART2.pdf"])
 
     assert [call.kwargs["is_an_attachment"] for call in mock_sanitise.call_args_list] == [False, True]
+
+    # sibling part (part 2) is backed up and removed from the scan bucket once merged
+    mock_copy_s3_object.assert_any_call(
+        current_app.config["LETTERS_SCAN_BUCKET_NAME"],
+        "filename.PART2.pdf",
+        current_app.config["PRECOMPILED_ORIGINALS_BACKUP_LETTER_BUCKET_NAME"],
+        "abc-123.part2.pdf",
+    )
+    mock_boto3.resource.return_value.Object.assert_called_once_with(
+        current_app.config["LETTERS_SCAN_BUCKET_NAME"], "filename.PART2.pdf"
+    )
+    mock_boto3.resource.return_value.Object.return_value.delete.assert_called_once()
 
     merged_pdf = PdfReader(BytesIO(mock_upload.call_args.kwargs["filedata"]))
     assert len(merged_pdf.pages) == 2
