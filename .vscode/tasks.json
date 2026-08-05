@@ -1,21 +1,21 @@
 {
     "version": "2.0.0",
     "tasks": [
-        {
-            "label": "Install Arial font",
-            "type": "shell",
-            "command": "mkdir -p ~/.local/share/fonts/ && cp docker/Arial.ttf ~/.local/share/fonts/ && sudo fc-cache -f",
-            "problemMatcher": [],
-            "presentation": {
-                "showReuseMessage": false,
-                "close": true
-            }
-        },
+        // {
+        //     "label": "Install Arial font",
+        //     "type": "shell",
+        //     "command": "mkdir -p ~/.local/share/fonts/ && cp docker/Arial.ttf ~/.local/share/fonts/ && sudo fc-cache -f",
+        //     "problemMatcher": [],
+        //     "presentation": {
+        //         "showReuseMessage": false,
+        //         "close": true
+        //     }
+        // },
         {
             "label": "Generate Template-preview version file",
             "type": "shell",
             "command": "make generate-version-file",
-            "dependsOn": ["Install Arial font"],
+            "dependsOn": [""],
             "problemMatcher": [],
             "presentation": {
                 "showReuseMessage": false,
@@ -41,12 +41,12 @@
         {
             "label": "Install Template-preview local notifynl-utils",
             "type": "shell",
-            "command": "uv pip uninstall notifynl-utils && uv pip install -e ../notifynl-utils",
+            "command": "CHOICE=$(cat /workspace/.local-editables-choice 2>/dev/null || echo No); if [ \"$CHOICE\" = \"Yes\" ]; then uv pip uninstall notifications-utils && uv pip install -e ../notifynl-utils; fi",
             "dependsOn": ["Install Template-preview Python requirements"],
             "problemMatcher": [],
             "presentation": {
                 "showReuseMessage": false,
-                "close": true
+                // "close": true
             },
             "options": {
                 "env": {
