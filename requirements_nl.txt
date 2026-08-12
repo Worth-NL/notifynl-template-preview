@@ -374,6 +374,7 @@ click==8.4.2 \
     #   click-plugins
     #   click-repl
     #   flask
+    #   notifications-utils
 click-didyoumean==0.3.1 \
     --hash=sha256:4f82fdff0dbe64ef8ab2279bd6aa3f6a99c3b28c05aa09cbfc07c9d7fbb5a463 \
     --hash=sha256:5c4bb6007cfea5f2fd6583a2fb6701a22a41eb98957e63d0fac41c10e7c3117c
@@ -447,7 +448,9 @@ dnspython==2.8.0 \
 eventlet==0.40.3 \
     --hash=sha256:290852db0065d78cec17a821b78c8a51cafb820a792796a354592ae4d5fceeb0 \
     --hash=sha256:e681cae6ee956cfb066a966b5c0541e734cc14879bda6058024104790595ac9d
-    # via gunicorn
+    # via
+    #   gunicorn
+    #   notifications-utils
 exceptiongroup==1.3.1 \
     --hash=sha256:8b412432c6055b0b7d14c310000ae93352ed6754f70fa8f7c34141f91c4e3219 \
     --hash=sha256:a7a39a3bd276781e98394987d3a5701d0c4edffb633bb7a5144577f82c773598
@@ -772,7 +775,7 @@ mistune==0.8.4 \
     --hash=sha256:59a3429db53c50b5c6bcc8a07f8848cb00d7dc8bdb431a4ab41920d201d4756e \
     --hash=sha256:88a1051873018da288eee8538d476dffe1262495144b33ecb586c4ab266bb8d4
     # via notifications-utils
-notifications-utils @ git+https://github.com/Worth-NL/notifynl-utils.git@f0cea6c0efccf59ff8b6756d9fc2e7b194275830
+notifications-utils @ git+https://github.com/Worth-NL/notifynl-utils.git@27db1ca534475b11e4c8af97f6c115630e7fc9bf
     # via -r requirements_nl.in
 opentelemetry-api==1.44.0 \
     --hash=sha256:67647e5e9566edcf421166fdf022b3537f818635daa852b289e34604dc6fb33a \
@@ -1451,6 +1454,7 @@ urllib3==2.7.0 \
     #   botocore
     #   celery
     #   kombu
+    #   notifications-utils
     #   requests
     #   sentry-sdk
 vine==5.1.0 \
@@ -1484,7 +1488,9 @@ webencodings==0.5.1 \
 werkzeug==3.1.8 \
     --hash=sha256:63a77fb8892bf28ebc3178683445222aa500e48ebad5ec77b0ad80f8726b1f50 \
     --hash=sha256:9bad61a4268dac112f1c5cd4630a56ede601b6ed420300677a869083d70a4c44
-    # via flask
+    # via
+    #   flask
+    #   notifications-utils
 wrapt==2.2.2 \
     --hash=sha256:0065a3b657cec06813b4241d2462ccec287f6863103d7445b725fb3a889736f9 \
     --hash=sha256:055e6fcfaa28e58c6a8c247d48b92be9d56f818b7068aa4f22b15b3343a09931 \
