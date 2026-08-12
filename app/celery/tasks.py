@@ -318,6 +318,8 @@ def create_pdf_for_templated_letter(self: Task, encoded_letter_data):
             TaskNames.UPDATE_VALIDATION_FAILED_FOR_TEMPLATED_LETTER,
             exc.page_count,
         )
+        if letter_details.get("attachments"):
+            _quarantine_letter_attachment_scan_objects(letter_details["attachments"])
         return
 
     page_count = get_page_count_for_pdf(cmyk_pdf)
@@ -389,6 +391,21 @@ def _dispatch_letter_pdf_outcome(self, notification_id, task_name, page_count):
 def _cleanup_letter_attachment_scan_objects(attachment_keys):
     s3 = boto3.resource("s3")
     for key in attachment_keys:
+        s3.Object(current_app.config["LETTERS_SCAN_BUCKET_NAME"], key).delete()
+
+
+def _quarantine_letter_attachment_scan_objects(attachment_keys):
+    # Mirrors _cleanup_letter_part_scan_objects: on validation failure, move attachment
+    # objects to the invalid-pdf bucket instead of just deleting, so a rejected
+    # attachment stays inspectable rather than vanishing from the scan bucket outright.
+    s3 = boto3.resource("s3")
+    for key in attachment_keys:
+        copy_s3_object(
+            current_app.config["LETTERS_SCAN_BUCKET_NAME"],
+            key,
+            current_app.config["INVALID_PDF_BUCKET_NAME"],
+            key,
+        )
         s3.Object(current_app.config["LETTERS_SCAN_BUCKET_NAME"], key).delete()
 
 

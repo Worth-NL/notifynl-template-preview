@@ -673,6 +673,8 @@ def test_create_pdf_for_templated_letter_dispatches_validation_failed_for_bad_ad
     )
     mock_upload = mocker.patch("app.celery.tasks.s3upload")
     mock_celery = mocker.patch("app.celery.tasks.notify_celery.send_task")
+    mock_copy = mocker.patch("app.celery.tasks.copy_s3_object")
+    mock_boto3 = mocker.patch("app.celery.tasks.boto3")
 
     data_for_create_pdf_for_templated_letter_task["attachments"] = ["abc-123/attachment-1.pdf"]
 
@@ -689,6 +691,19 @@ def test_create_pdf_for_templated_letter_dispatches_validation_failed_for_bad_ad
         MessageGroupId="test-message-group-id",
     )
     assert any("Ad-hoc attachment validation failed" in message for message in caplog.messages)
+
+    # the ad-hoc attachment's raw scan-bucket object must not be orphaned - it's moved to
+    # the invalid-pdf bucket (inspectable) rather than left behind or silently deleted
+    mock_copy.assert_called_once_with(
+        current_app.config["LETTERS_SCAN_BUCKET_NAME"],
+        "abc-123/attachment-1.pdf",
+        current_app.config["INVALID_PDF_BUCKET_NAME"],
+        "abc-123/attachment-1.pdf",
+    )
+    mock_boto3.resource.return_value.Object.assert_called_once_with(
+        current_app.config["LETTERS_SCAN_BUCKET_NAME"], "abc-123/attachment-1.pdf"
+    )
+    mock_boto3.resource.return_value.Object.return_value.delete.assert_called_once()
 
 
 def test_create_pdf_for_templated_letter_errors_if_attachment_pushes_over_page_count(
