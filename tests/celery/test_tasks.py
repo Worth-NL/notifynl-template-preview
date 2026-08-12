@@ -494,6 +494,7 @@ def test_create_pdf_for_templated_letter_happy_path(
         language="english",
         includes_first_page=True,
         date=expected_date_value,
+        letter_address_placement="50mm",
     )
 
     mock_upload.assert_called_once_with(

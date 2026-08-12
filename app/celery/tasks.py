@@ -276,6 +276,7 @@ def _create_pdf_for_letter(
         language=language,
         includes_first_page=includes_first_page,
         date=get_datetime_from_json(letter_details),
+        letter_address_placement=letter_details.get("letter_address_placement") or "50mm",
     )
     with current_app.test_request_context(""):
         html = HTML(string=str(template))

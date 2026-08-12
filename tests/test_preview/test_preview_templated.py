@@ -757,3 +757,31 @@ def test_get_html(logo, is_svg_expected, view_letter_template_request_data, clie
 
     output_html = get_html(view_letter_template_request_data)
     assert (image_tag in output_html) is is_svg_expected
+
+
+@pytest.mark.parametrize(
+    "letter_address_placement, expected_class",
+    [
+        ("60mm", "pingen"),
+        ("50mm", ""),
+        (None, ""),
+    ],
+)
+def test_get_html_applies_letter_address_placement(
+    view_letter_template_request_data, letter_address_placement, expected_class, client
+):
+    view_letter_template_request_data["filename"] = None
+    view_letter_template_request_data["letter_address_placement"] = letter_address_placement
+
+    output_html = get_html(view_letter_template_request_data)
+
+    assert f'class="recipient-address align-with-envelope-window {expected_class}">' in output_html
+
+
+def test_get_html_defaults_letter_address_placement_when_key_absent(view_letter_template_request_data, client):
+    view_letter_template_request_data["filename"] = None
+    assert "letter_address_placement" not in view_letter_template_request_data
+
+    output_html = get_html(view_letter_template_request_data)
+
+    assert 'class="recipient-address align-with-envelope-window ">' in output_html
