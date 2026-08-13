@@ -69,29 +69,14 @@ def test_add_attachments_to_letter_with_neither_is_a_passthrough(mocker):
     assert get_page_count_for_pdf(response) == _page_count(valid_letter)
 
 
-def test_get_adhoc_attachment_pdfs_skips_sanitisation_for_test_key(mocker, client):
-    mock_download = mocker.patch("app.letter_attachments.s3download", return_value=BytesIO(b"raw-bytes"))
-    mock_sanitise = mocker.patch("app.precompiled.sanitise_file_contents")
-
-    result = get_adhoc_attachment_pdfs(
-        ["abc-123/attachment-1.pdf"], is_test_key=True, allow_international_letters=False
-    )
-
-    mock_download.assert_called_once_with(current_app.config["LETTERS_SCAN_BUCKET_NAME"], "abc-123/attachment-1.pdf")
-    assert not mock_sanitise.called
-    assert result[0].read() == b"raw-bytes"
-
-
-def test_get_adhoc_attachment_pdfs_sanitises_for_real_key(mocker, client):
+def test_get_adhoc_attachment_pdfs_sanitises_attachments(mocker, client):
     mocker.patch("app.letter_attachments.s3download", return_value=BytesIO(b"raw-bytes"))
     mock_sanitise = mocker.patch(
         "app.precompiled.sanitise_file_contents",
         return_value=_sanitise_result(1, blank_page),
     )
 
-    result = get_adhoc_attachment_pdfs(
-        ["abc-123/attachment-1.pdf"], is_test_key=False, allow_international_letters=True
-    )
+    result = get_adhoc_attachment_pdfs(["abc-123/attachment-1.pdf"], allow_international_letters=True)
 
     mock_sanitise.assert_called_once_with(
         b"raw-bytes",
@@ -114,7 +99,6 @@ def test_get_adhoc_attachment_pdfs_processes_multiple_keys_in_order(mocker, clie
 
     result = get_adhoc_attachment_pdfs(
         ["abc-123/attachment-1.pdf", "abc-123/attachment-2.pdf"],
-        is_test_key=False,
         allow_international_letters=False,
     )
 
@@ -136,7 +120,7 @@ def test_get_adhoc_attachment_pdfs_raises_validation_failed_on_sanitisation_fail
     )
 
     with pytest.raises(ValidationFailed) as exc_info:
-        get_adhoc_attachment_pdfs(["abc-123/attachment-1.pdf"], is_test_key=False, allow_international_letters=False)
+        get_adhoc_attachment_pdfs(["abc-123/attachment-1.pdf"], allow_international_letters=False)
 
     assert exc_info.value.message == "content-outside-printable-area"
     assert exc_info.value.invalid_pages == [1]
@@ -162,7 +146,6 @@ def test_get_adhoc_attachment_pdfs_stops_at_first_failing_attachment(mocker, cli
     with pytest.raises(ValidationFailed):
         get_adhoc_attachment_pdfs(
             ["abc-123/attachment-1.pdf", "abc-123/attachment-2.pdf"],
-            is_test_key=False,
             allow_international_letters=False,
         )
 

@@ -605,12 +605,15 @@ def test_create_pdf_for_templated_letter_adds_letter_attachment_if_provided(
     assert mock_celery.call_args.kwargs["name"] == "update-billable-units-for-letter"
 
 
-def test_create_pdf_for_templated_letter_merges_adhoc_attachments_for_test_key(
+def test_create_pdf_for_templated_letter_sanitises_adhoc_attachments_for_test_key_too(
     mocker, client, data_for_create_pdf_for_templated_letter_task
 ):
     mock_upload = mocker.patch("app.celery.tasks.s3upload")
     mocker.patch("app.celery.tasks.notify_celery.send_task")
-    mock_sanitise = mocker.patch("app.precompiled.sanitise_file_contents")
+    mock_sanitise = mocker.patch(
+        "app.precompiled.sanitise_file_contents",
+        return_value=_sanitise_result(1, blank_page),
+    )
     mocker.patch("app.letter_attachments.s3download", return_value=BytesIO(blank_page))
     mock_boto3 = mocker.patch("app.celery.tasks.boto3")
 
@@ -621,9 +624,10 @@ def test_create_pdf_for_templated_letter_merges_adhoc_attachments_for_test_key(
 
     create_pdf_for_templated_letter(encoded_data)
 
-    # test-key sends skip AV/sanitisation entirely for ad-hoc attachments, but the scanned
-    # attachment is still cleaned up from the scan bucket like a real send
-    assert not mock_sanitise.called
+    # test-key sends are sanitised the same as any other send, so service users see
+    # consistent results regardless of key type; the scanned attachment is still
+    # cleaned up from the scan bucket afterwards either way
+    mock_sanitise.assert_called_once()
     merged_pdf = PdfReader(mock_upload.call_args.kwargs["filedata"])
     assert len(merged_pdf.pages) == 2  # templated letter (1 page) + ad-hoc attachment (1 page)
     mock_boto3.resource.return_value.Object.assert_called_once_with(

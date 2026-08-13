@@ -32,7 +32,6 @@ def generate_templated_pdf(
         adhoc_attachment_pdfs = (
             get_adhoc_attachment_pdfs(
                 adhoc_attachment_keys,
-                is_test_key=letter_details["key_type"] == "test",
                 allow_international_letters=letter_details.get("allow_international_letters", False),
             )
             if adhoc_attachment_keys

@@ -17,13 +17,11 @@ def get_attachment_pdf(service_id, attachment_id) -> BytesIO:
     )
 
 
-def get_adhoc_attachment_pdfs(
-    attachment_keys: list[str], *, is_test_key: bool, allow_international_letters: bool
-) -> list[BytesIO]:
+def get_adhoc_attachment_pdfs(attachment_keys: list[str], *, allow_international_letters: bool) -> list[BytesIO]:
     """
-    Downloads and (unless a test-key send) sanitises each ad-hoc attachment submitted
-    at send time on a templated letter. Raises ValidationFailed on the first attachment
-    that fails sanitisation - sanitise_file_contents itself never raises, it returns a
+    Downloads and sanitises each ad-hoc attachment submitted at send time on a
+    templated letter. Raises ValidationFailed on the first attachment that fails
+    sanitisation - sanitise_file_contents itself never raises, it returns a
     dict with a `message` key set on failure, so we translate that into an exception here.
     """
     # deferred import: app.precompiled imports app.preview, which imports this module
@@ -33,10 +31,6 @@ def get_adhoc_attachment_pdfs(
     pdfs = []
     for key in attachment_keys:
         raw = s3download(current_app.config["LETTERS_SCAN_BUCKET_NAME"], key).read()
-
-        if is_test_key:
-            pdfs.append(BytesIO(raw))
-            continue
 
         sanitisation_details = sanitise_file_contents(
             raw,
