@@ -32,7 +32,8 @@
         "-P",
         "solo"
       ],
-      "consoleName": "Template Preview Worker"
+      "consoleName": "Template Preview Worker",
+      "preLaunchTask": "Install Template-preview local notifynl-utils"
     }
   ],
   "compounds": [

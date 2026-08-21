@@ -21,6 +21,18 @@ def stitch_pdfs(first_pdf: BytesIO, second_pdf: BytesIO) -> BytesIO:
     return pdf_bytes
 
 
+@sentry_sdk.trace
+def merge_letter_parts(pdfs: list[BytesIO]) -> BytesIO:
+    """
+    Merges an ordered list of precompiled letter parts into a single PDF,
+    preserving submission order (pdfs[0]'s pages first, then pdfs[1]'s, etc).
+    """
+    merged = pdfs[0]
+    for pdf in pdfs[1:]:
+        merged = stitch_pdfs(merged, pdf)
+    return merged
+
+
 class PDFPurpose(StrEnum):
     PREVIEW = auto()
     PRINT = auto()

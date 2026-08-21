@@ -39,6 +39,7 @@ preview_schema = {
         },
         "filename": {"type": ["string", "null"]},
         "date": {"type": ["string", "null"]},
+        "letter_address_placement": {"type": ["string", "null"], "enum": ["50mm", "60mm", None]},
     },
     "required": ["letter_contact_block", "template", "values", "filename"],
     "additionalProperties": False,

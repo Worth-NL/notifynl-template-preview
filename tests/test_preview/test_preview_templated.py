@@ -298,7 +298,7 @@ def test_view_letter_template_png_with_attachment_hits_cache_correct_number_of_t
 ):
     mocked_cache_get.side_effect = [cache_response_body(data=b"\x00"), attachment_cache]
 
-    mocker.patch("app.templated.add_attachment_to_letter", return_value=BytesIO(multi_page_pdf))
+    mocker.patch("app.templated.add_attachments_to_letter", return_value=BytesIO(multi_page_pdf))
 
     response = client.post(
         url_for(
@@ -527,7 +527,7 @@ def test_view_letter_template_png_when_requested_page_out_of_range(
 ):
     mocker.patch("app.preview.hide_notify_tag")
     mocker.patch(
-        "app.templated.add_attachment_to_letter", return_value=BytesIO(cmyk_and_rgb_images_in_one_pdf)
+        "app.templated.add_attachments_to_letter", return_value=BytesIO(cmyk_and_rgb_images_in_one_pdf)
     )  # 2-page PDF
     response = client.post(
         url_for(
@@ -576,8 +576,8 @@ def test_letter_template_constructed_properly_for_pdf(view_letter_template_reque
 
 def test_view_letter_template_pdf_adds_attachment(mocker, view_letter_template_request_data, view_letter_template_pdf):
     mock_get_pdf = mocker.patch("app.preview.get_pdf", return_value=BytesIO(b"templated letter pdf"))
-    mock_add_attachment_to_letter = mocker.patch(
-        "app.templated.add_attachment_to_letter", return_value=BytesIO(b"combined pdf")
+    mock_add_attachments_to_letter = mocker.patch(
+        "app.templated.add_attachments_to_letter", return_value=BytesIO(b"combined pdf")
     )
 
     view_letter_template_request_data["template"]["letter_attachment"] = {"page_count": 1, "id": "5678"}
@@ -586,10 +586,11 @@ def test_view_letter_template_pdf_adds_attachment(mocker, view_letter_template_r
 
     assert resp.status_code == 200
     assert resp.get_data() == b"combined pdf"
-    mock_add_attachment_to_letter.assert_called_once_with(
+    mock_add_attachments_to_letter.assert_called_once_with(
         service_id="1234",
         templated_letter_pdf=mock_get_pdf.return_value,
-        attachment_object={"page_count": 1, "id": "5678"},
+        fixed_attachment={"page_count": 1, "id": "5678"},
+        adhoc_attachment_pdfs=[],
     )
 
 
@@ -756,3 +757,31 @@ def test_get_html(logo, is_svg_expected, view_letter_template_request_data, clie
 
     output_html = get_html(view_letter_template_request_data)
     assert (image_tag in output_html) is is_svg_expected
+
+
+@pytest.mark.parametrize(
+    "letter_address_placement, expected_class",
+    [
+        ("60mm", "pingen"),
+        ("50mm", ""),
+        (None, ""),
+    ],
+)
+def test_get_html_applies_letter_address_placement(
+    view_letter_template_request_data, letter_address_placement, expected_class, client
+):
+    view_letter_template_request_data["filename"] = None
+    view_letter_template_request_data["letter_address_placement"] = letter_address_placement
+
+    output_html = get_html(view_letter_template_request_data)
+
+    assert f'class="recipient-address align-with-envelope-window {expected_class}">' in output_html
+
+
+def test_get_html_defaults_letter_address_placement_when_key_absent(view_letter_template_request_data, client):
+    view_letter_template_request_data["filename"] = None
+    assert "letter_address_placement" not in view_letter_template_request_data
+
+    output_html = get_html(view_letter_template_request_data)
+
+    assert 'class="recipient-address align-with-envelope-window ">' in output_html

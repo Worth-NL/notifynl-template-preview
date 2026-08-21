@@ -8,4 +8,17 @@ set_gunicorn_defaults(globals())
 workers = 5
 timeout = int(os.getenv("HTTP_SERVE_TIMEOUT_SECONDS", 30))
 
-max_requests = 10
+# k8s readinessProbe/livenessProbe (see templatePreviewApi in notifynl-charts-private)
+# hit /_status?simple=1 continuously for the pod's entire lifetime, not just until
+# first-ready, at periodSeconds=3/10 respectively (~1560 requests/hour/pod). That's
+# real request volume from gunicorn's perspective, so a low max_requests budget gets
+# consumed almost entirely by probes rather than actual rendering - measured live in
+# notifynl-test, worker restarts were ~100% probe-driven when this was 10. Keep this
+# high enough that real render traffic (not probes) is what drives recycling; jitter
+# staggers the 5 workers so they don't all hit the ceiling on the same request.
+# Deliberately not raised further (e.g. into the tens of thousands) yet:
+# templatePreviewApi's pod memory limit is shared across all 5 workers (no per-worker
+# cap), and we don't have measured WeasyPrint/Ghostscript memory growth per render to
+# size against - only probe volume. Revisit once that's measured.
+max_requests = 1000
+max_requests_jitter = 100
