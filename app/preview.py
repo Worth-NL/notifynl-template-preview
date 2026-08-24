@@ -215,7 +215,7 @@ def get_html(json, language="english", includes_first_page=True):
             date=get_datetime_from_json(json),
             language=language,
             includes_first_page=includes_first_page,
-            letter_address_placement=json.get("letter_address_placement") or "50mm",
+            letter_address_placement=json.get("letter_address_placement") or "60mm",
         )
     )
 

@@ -15,6 +15,7 @@ from reportlab.lib.units import mm
 from reportlab.pdfgen import canvas
 
 from app.precompiled import (
+    DEFAULT_LETTER_ADDRESS_PLACEMENT,
     NotifyCanvas,
     _warn_if_filesize_has_grown,
     add_address_to_precompiled_letter,
@@ -384,7 +385,9 @@ def test_overlay_template_png_for_page_checks_if_first_page(client, auth_header,
     )
 
     assert response.status_code == 200
-    mock_colour.assert_called_once_with(ANY, is_first_page=expected_first_page)
+    mock_colour.assert_called_once_with(
+        ANY, is_first_page=expected_first_page, letter_address_placement=DEFAULT_LETTER_ADDRESS_PLACEMENT
+    )
     mock_png_from_pdf.assert_called_once_with(mock_colour.return_value, page_number=1)
 
 
@@ -431,7 +434,11 @@ def test_overlay_template_pdf_colours_pages_in_red(client, auth_header, mocker):
     )
     assert resp.status_code == 200
 
-    assert mock_colour.call_args_list == [call(ANY, is_first_page=True)] + [call(ANY, is_first_page=False)] * 9
+    assert (
+        mock_colour.call_args_list
+        == [call(ANY, is_first_page=True, letter_address_placement=DEFAULT_LETTER_ADDRESS_PLACEMENT)]
+        + [call(ANY, is_first_page=False, letter_address_placement=DEFAULT_LETTER_ADDRESS_PLACEMENT)] * 9
+    )
 
 
 @pytest.mark.skip(reason="[NOTIFYNL] Broken by validation change")
@@ -524,8 +531,9 @@ def test_precompiled_sanitise_pdf_with_colour_outside_boundaries_returns_400(cli
 
 
 def test_precompiled_sanitise_pdf_with_colour_in_address_margin_returns_400(client, auth_header, mocker):
+    # fixture's address block is laid out at the 50mm position
     response = client.post(
-        url_for("precompiled_blueprint.sanitise_precompiled_letter"),
+        url_for("precompiled_blueprint.sanitise_precompiled_letter", letter_address_placement="50mm"),
         data=address_margin,
         headers={"Content-type": "application/json", **auth_header},
     )
@@ -743,7 +751,8 @@ def test_rewrite_address_block_end_to_end(pdf_data, address_snippet):
 
 
 def test_extract_address_block():
-    assert extract_address_block(BytesIO(example_dwp_pdf)).raw_address == "\n".join(
+    # fixture's address block is laid out at the 50mm position
+    assert extract_address_block(BytesIO(example_dwp_pdf), letter_address_placement="50mm").raw_address == "\n".join(
         [
             "MR J DOE",
             "13 TEST LANE",
@@ -824,7 +833,8 @@ def test_redact_address_block_preserves_addresses_elsewhere_on_page():
 
 
 def test_redact_precompiled_letter_address_block_only_touches_first_page():
-    address = extract_address_block(BytesIO(address_block_repeated_on_second_page))
+    # fixture's address block is laid out at the 50mm position
+    address = extract_address_block(BytesIO(address_block_repeated_on_second_page), letter_address_placement="50mm")
     assert address.raw_address != ""  # check something is there before we redact
 
     doc = fitz.open("pdf", address_block_repeated_on_second_page)
@@ -832,8 +842,9 @@ def test_redact_precompiled_letter_address_block_only_touches_first_page():
 
     new_pdf = redact_precompiled_letter_address_block(
         BytesIO(address_block_repeated_on_second_page),
+        letter_address_placement="50mm",
     )
-    assert extract_address_block(new_pdf).raw_address == ""
+    assert extract_address_block(new_pdf, letter_address_placement="50mm").raw_address == ""
 
     doc = fitz.open("pdf", new_pdf)
     new_second_page_text = doc[1].get_text()
@@ -853,7 +864,7 @@ def test_sanitise_file_contents_on_pdf_with_no_resources_on_one_of_the_pages_con
     be valid and return a successful response, but some test that this returns a correct response is at least better
     than this call raising an error/500."""
     response = client.post(
-        "/precompiled/sanitise",
+        "/precompiled/sanitise?letter_address_placement=50mm",
         data=no_resources_on_last_page,
         headers={"Content-type": "application/json", **auth_header},
     )
