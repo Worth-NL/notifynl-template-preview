@@ -93,6 +93,20 @@ ADDRESS_TOP_FROM_TOP_OF_PAGE_BY_PLACEMENT = {
 }
 ADDRESS_WINDOW_HEIGHT = 40.0
 
+PLACEMENT_MISMATCH_CANDIDATE_ERROR_CODES = frozenset({"not-enough-address-lines", "address-is-empty"})
+
+
+def _other_letter_address_placement(letter_address_placement):
+    """Given a (possibly unrecognised) placement, return the other of the two valid values.
+
+    Unrecognised/None input intentionally falls back to "50mm", not "60mm": the PRIMARY
+    extraction (address_top_from_top_of_page) already treats an unrecognised value as
+    DEFAULT_LETTER_ADDRESS_PLACEMENT ("60mm"), so the retry's "other" window must be 50mm
+    to actually differ from what the primary extraction just used. Falling back to "60mm"
+    here would silently re-run the exact same window as the primary attempt.
+    """
+    return "60mm" if letter_address_placement == "50mm" else "50mm"
+
 
 def address_top_from_top_of_page(letter_address_placement):
     return ADDRESS_TOP_FROM_TOP_OF_PAGE_BY_PLACEMENT.get(
@@ -831,6 +845,17 @@ def rewrite_address_block(pdf, *, page_count, allow_international_letters, filen
     address.allow_international_letters = allow_international_letters
 
     if address.error_code:
+        if address.error_code in PLACEMENT_MISMATCH_CANDIDATE_ERROR_CODES:
+            # Too-few-lines/empty can mean either a genuinely malformed address, or a
+            # window anchored at the wrong placement clipping real content. Re-extract at
+            # the other of the two valid placements: if that comes back FULLY valid (not
+            # just "enough lines" - avoids false positives from incidental page text), it's
+            # confirmed evidence of a placement mismatch rather than a malformed address.
+            other_placement = _other_letter_address_placement(letter_address_placement)
+            other_address = extract_address_block(pdf, letter_address_placement=other_placement)
+            other_address.allow_international_letters = allow_international_letters
+            if not other_address.error_code:
+                raise ValidationFailed("address-placement-mismatch", [1], page_count=page_count)
         raise ValidationFailed(address.error_code, [1], page_count=page_count)
 
     # pdf = redact_precompiled_letter_address_block(pdf)
