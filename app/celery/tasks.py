@@ -16,7 +16,7 @@ from notifications_utils.template import LetterPrintTemplate
 
 from app import ValidationFailed, notify_celery
 from app.config import QueueNames, TaskNames, TaskNamesNL
-from app.precompiled import sanitise_file_contents
+from app.precompiled import DEFAULT_LETTER_ADDRESS_PLACEMENT, sanitise_file_contents
 from app.preview import get_page_count_for_pdf
 from app.templated import generate_templated_pdf
 from app.utils import PDFPurpose, get_datetime_from_json, get_transient_letter_file_location, merge_letter_parts
@@ -24,7 +24,9 @@ from app.weasyprint_hack import WeasyprintError
 
 
 @notify_celery.task(name="sanitise-and-upload-letter", bind=True)
-def sanitise_and_upload_letter(self: Task, notification_id, filename, allow_international_letters=False):
+def sanitise_and_upload_letter(
+    self: Task, notification_id, filename, allow_international_letters=False, letter_address_placement=None
+):
     current_app.logger.info(
         "Sanitising notification with id %s", notification_id, extra={"notification_id": notification_id}
     )
@@ -35,6 +37,7 @@ def sanitise_and_upload_letter(self: Task, notification_id, filename, allow_inte
             pdf_content,
             allow_international_letters=allow_international_letters,
             filename=filename,
+            letter_address_placement=letter_address_placement or DEFAULT_LETTER_ADDRESS_PLACEMENT,
         )
 
         # Only files that have failed sanitisation have 'message' in the sanitisation_details dict
@@ -95,7 +98,9 @@ def sanitise_and_upload_letter(self: Task, notification_id, filename, allow_inte
 
 
 @notify_celery.task(name=TaskNamesNL.SANITISE_AND_MERGE_LETTER_PARTS)
-def sanitise_and_merge_letter_parts(notification_id, filenames, allow_international_letters=False):
+def sanitise_and_merge_letter_parts(
+    notification_id, filenames, allow_international_letters=False, letter_address_placement=None
+):
     """
     Precompiled letters submitted as multiple PDFs (up to 3), to be merged into a single
     letter in submission order. Each part is sanitised individually first - part 0 is
@@ -123,6 +128,7 @@ def sanitise_and_merge_letter_parts(notification_id, filenames, allow_internatio
                 allow_international_letters=allow_international_letters,
                 filename=filename,
                 is_an_attachment=part_index > 0,
+                letter_address_placement=letter_address_placement or DEFAULT_LETTER_ADDRESS_PLACEMENT,
             )
 
             if sanitisation_details.get("message"):
@@ -276,7 +282,7 @@ def _create_pdf_for_letter(
         language=language,
         includes_first_page=includes_first_page,
         date=get_datetime_from_json(letter_details),
-        letter_address_placement=letter_details.get("letter_address_placement") or "50mm",
+        letter_address_placement=letter_details.get("letter_address_placement") or "60mm",
     )
     with current_app.test_request_context(""):
         html = HTML(string=str(template))
@@ -427,7 +433,9 @@ def _remove_folder_from_filename(filename):
 
 
 @notify_celery.task(name="recreate-pdf-for-precompiled-letter")
-def recreate_pdf_for_precompiled_letter(notification_id, file_location, allow_international_letters):
+def recreate_pdf_for_precompiled_letter(
+    notification_id, file_location, allow_international_letters, letter_address_placement=None
+):
     """
     This task takes the details of a PDF letter which we want to recreate as its arguments.
     It gets the backup version of the PDF letter from the backup bucket, sanitises it and moves the
@@ -450,6 +458,7 @@ def recreate_pdf_for_precompiled_letter(notification_id, file_location, allow_in
             pdf_content,
             allow_international_letters=allow_international_letters,
             filename=file_location,
+            letter_address_placement=letter_address_placement or DEFAULT_LETTER_ADDRESS_PLACEMENT,
         )
 
         # Only files that have failed sanitisation have 'message' in the sanitisation_details dict

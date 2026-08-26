@@ -764,7 +764,9 @@ def test_get_html(logo, is_svg_expected, view_letter_template_request_data, clie
     [
         ("60mm", "pingen"),
         ("50mm", ""),
-        (None, ""),
+        # None (unspecified) now defaults to "60mm", matching Service.letter_address_placement's
+        # own DB default - see notifynl-utils' LetterPreviewTemplate default.
+        (None, "pingen"),
     ],
 )
 def test_get_html_applies_letter_address_placement(
@@ -778,10 +780,10 @@ def test_get_html_applies_letter_address_placement(
     assert f'class="recipient-address align-with-envelope-window {expected_class}">' in output_html
 
 
-def test_get_html_defaults_letter_address_placement_when_key_absent(view_letter_template_request_data, client):
+def test_get_html_defaults_letter_address_placement_to_60mm_when_key_absent(view_letter_template_request_data, client):
     view_letter_template_request_data["filename"] = None
     assert "letter_address_placement" not in view_letter_template_request_data
 
     output_html = get_html(view_letter_template_request_data)
 
-    assert 'class="recipient-address align-with-envelope-window ">' in output_html
+    assert 'class="recipient-address align-with-envelope-window pingen">' in output_html
