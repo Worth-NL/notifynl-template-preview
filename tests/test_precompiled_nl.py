@@ -7,9 +7,18 @@ from flask import url_for
 from app import ValidationFailed
 from app.precompiled import (
     _other_letter_address_placement,
+    extract_address_block,
     rewrite_address_block,
 )
-from tests.pdf_consts import bad_postcode
+from tests.pdf_consts import (
+    address_50mm_no_retouradres,
+    address_50mm_with_retouradres,
+    address_60mm_no_retouradres,
+    address_60mm_with_retouradres,
+    address_with_retouradres_missing_city,
+    address_with_retouradres_missing_postcode,
+    bad_postcode,
+)
 
 
 @pytest.mark.parametrize(
@@ -146,3 +155,39 @@ def test_sanitise_precompiled_letter_returns_address_placement_mismatch_end_to_e
 # example_dwp_pdf extracts a plausibly-formatted postcode ("TS7 1NG") that the real-UK-postcode
 # validator nonetheless rejects. That's a genuine, pre-existing, placement-unrelated bug, out of
 # scope for this fix - left skipped upstream rather than "fixed" here with a misleading test.
+
+
+@pytest.mark.parametrize(
+    "pdf, letter_address_placement",
+    [
+        (address_50mm_no_retouradres, "50mm"),
+        (address_60mm_no_retouradres, "60mm"),
+        (address_50mm_with_retouradres, "50mm"),
+        (address_60mm_with_retouradres, "60mm"),
+    ],
+)
+def test_extract_address_block_valid_with_and_without_retouradres_line(pdf, letter_address_placement):
+    address = extract_address_block(BytesIO(pdf), letter_address_placement=letter_address_placement)
+
+    assert address.error_code is None
+    assert address.normalised_lines == ["Persoonlijk", "Coolsingel 40", "3011 AD  ROTTERDAM"]
+
+
+def test_extract_address_block_retouradres_does_not_mask_missing_city():
+    address = extract_address_block(BytesIO(address_with_retouradres_missing_city), letter_address_placement="50mm")
+
+    assert address.error_code is not None
+
+
+def test_extract_address_block_retouradres_does_not_mask_missing_postcode():
+    address = extract_address_block(BytesIO(address_with_retouradres_missing_postcode), letter_address_placement="50mm")
+
+    assert address.error_code is not None
+
+
+def test_add_address_to_precompiled_letter_with_retouradres_extracts_untouched_raw_text():
+    # The Retouradres line is only stripped during PostalAddress parsing, not at extraction -
+    # .raw_address should still contain it verbatim.
+    address = extract_address_block(BytesIO(address_50mm_with_retouradres), letter_address_placement="50mm")
+
+    assert address.raw_address.startswith("Retouradres: Postbus 70013, 3000 KR ROTTERDAM")
