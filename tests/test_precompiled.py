@@ -290,6 +290,30 @@ def test_get_invalid_pages_black_text(client, x, y, page, expected_message):
     assert get_invalid_pages_with_message(packet) == expected_message
 
 
+def test_get_invalid_pages_closes_gap_between_address_bottom_and_body_top_for_50mm_placement(client):
+    """[NOTIFYNL] Regression test for the gap between address_bottom_from_top_of_page("50mm")
+    (90mm) and the old bare BODY_TOP_FROM_TOP_OF_PAGE (95mm) - previously uncovered by
+    _overlay_printable_areas_of_address_block_page_with_white, letting a "Datum"/"Onderwerp"
+    block just below a 50mm-placed address window get wrongly flagged
+    content-outside-printable-area (Den Haag SZW letter, 2026-08-31).
+    """
+    packet = io.BytesIO()
+    cv = canvas.Canvas(packet, pagesize=A4)
+    cv.setStrokeColor(white)
+    cv.setFillColor(white)
+    cv.rect(0, 0, 1000, 1000, stroke=1, fill=1)
+
+    cv.setStrokeColor(black)
+    cv.setFillColor(black)
+    # x=60mm is inside the address column; y=92mm sits in the old gap between
+    # address_bottom_from_top_of_page("50mm")=90mm and the old bare BODY_TOP=95mm.
+    cv.drawString(60 * mm, (297 - 92) * mm, "This is a test string used to detect non white on a page")
+
+    cv.save()
+    packet.seek(0)
+    assert get_invalid_pages_with_message(packet, letter_address_placement="50mm") == ("", [])
+
+
 def test_get_invalid_pages_address_margin(client):
     packet = io.BytesIO()
     cv = canvas.Canvas(packet, pagesize=A4)

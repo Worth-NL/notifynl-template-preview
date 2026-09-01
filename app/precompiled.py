@@ -144,6 +144,20 @@ def logo_bottom_from_top_of_page(letter_address_placement):
     return address_top_from_top_of_page(letter_address_placement)
 
 
+# [NOTIFYNL] must be no later than address_bottom_from_top_of_page(letter_address_placement), so
+# the address overlay meets the body overlay with no gap - mirrors logo_bottom_from_top_of_page's
+# fix for the equivalent gap above the address block. Deliberately a NEW function rather than
+# renaming BODY_TOP_FROM_TOP_OF_PAGE itself: SERVICE_ADDRESS_BOTTOM_FROM_TOP_OF_PAGE aliases that
+# constant directly and must keep reading a plain 95mm.
+#
+# For "60mm" (address_bottom=100mm) this is a no-op (95mm already reaches past the address
+# window). For "50mm" (address_bottom=90mm) it pulls body_top down to 90mm, closing the gap that
+# let "Datum"/"Onderwerp" text sitting just below a 50mm-placed address window go un-whited-out
+# and get wrongly flagged content-outside-printable-area (Den Haag SZW letter, 2026-08-31).
+def body_top_from_top_of_page(letter_address_placement):
+    return min(BODY_TOP_FROM_TOP_OF_PAGE, address_bottom_from_top_of_page(letter_address_placement))
+
+
 A4_HEIGHT_IN_PTS = A4_HEIGHT * mm
 
 MAX_FILESIZE = 2 * 1024 * 1024  # 2MB
@@ -676,12 +690,13 @@ def _overlay_printable_areas_of_address_block_page_with_white(pdf, letter_addres
     address_top = address_top_from_top_of_page(letter_address_placement)
     address_bottom = address_bottom_from_top_of_page(letter_address_placement)
     logo_bottom = logo_bottom_from_top_of_page(letter_address_placement)
+    body_top = body_top_from_top_of_page(letter_address_placement)
 
     # Overlay the blanks where the service can print as per the template
     # The first page is more varied because of address blocks etc subsequent pages are more simple
 
     # Body
-    pt1 = BORDER_LEFT_FROM_LEFT_OF_PAGE - 1, BODY_TOP_FROM_TOP_OF_PAGE - 1
+    pt1 = BORDER_LEFT_FROM_LEFT_OF_PAGE - 1, body_top - 1
     pt2 = BORDER_RIGHT_FROM_LEFT_OF_PAGE + 1, BORDER_BOTTOM_FROM_TOP_OF_PAGE + 1
     can.rect(pt1, pt2)
 
@@ -779,12 +794,12 @@ def _colour_no_print_areas_of_page_in_red(
     # The first page is more varied because of address blocks etc subsequent pages are more simple
     if is_first_page:
         address_top = address_top_from_top_of_page(letter_address_placement)
-        address_bottom = address_bottom_from_top_of_page(letter_address_placement)
         logo_bottom = logo_bottom_from_top_of_page(letter_address_placement)
+        body_top = body_top_from_top_of_page(letter_address_placement)
 
         # left from address block (from logo area all the way to body)
         pt1 = BORDER_LEFT_FROM_LEFT_OF_PAGE, logo_bottom
-        pt2 = ADDRESS_LEFT_FROM_LEFT_OF_PAGE, BODY_TOP_FROM_TOP_OF_PAGE
+        pt2 = ADDRESS_LEFT_FROM_LEFT_OF_PAGE, body_top
         can.rect(pt1, pt2)
 
         # directly above address block
@@ -794,15 +809,16 @@ def _colour_no_print_areas_of_page_in_red(
 
         # right from address block (from logo area all the way to body)
         pt1 = ADDRESS_RIGHT_FROM_LEFT_OF_PAGE, logo_bottom
-        pt2 = SERVICE_ADDRESS_LEFT_FROM_LEFT_OF_PAGE, BODY_TOP_FROM_TOP_OF_PAGE
+        pt2 = SERVICE_ADDRESS_LEFT_FROM_LEFT_OF_PAGE, body_top
         can.rect(pt1, pt2)
 
-        # below address block - only a genuine gap for placements where the window's bottom
-        # doesn't already reach into body territory (e.g. 60mm/Pingen sits closer to BODY_TOP)
-        if address_bottom < BODY_TOP_FROM_TOP_OF_PAGE:
-            pt1 = ADDRESS_LEFT_FROM_LEFT_OF_PAGE, address_bottom
-            pt2 = ADDRESS_RIGHT_FROM_LEFT_OF_PAGE, BODY_TOP_FROM_TOP_OF_PAGE
-            can.rect(pt1, pt2)
+        # [NOTIFYNL] there used to be a fourth rect here, directly below the address block, drawn
+        # only "if address_bottom < BODY_TOP_FROM_TOP_OF_PAGE" (a genuine gap for placements like
+        # 50mm, where the window's bottom doesn't already reach into body territory). Now that
+        # body_top_from_top_of_page() is defined as min(BODY_TOP_FROM_TOP_OF_PAGE, address_bottom),
+        # that condition can never be true, so it's removed as dead code - mirroring how the
+        # boundary directly above the address block (logo_bottom/address_top) has never needed an
+        # equivalent guard.
 
     # move to the beginning of the StringIO buffer
     new_pdf = PdfReader(can.get_bytes())
