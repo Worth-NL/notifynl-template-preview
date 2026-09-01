@@ -130,6 +130,34 @@ def address_bounding_box(letter_address_placement):
     )
 
 
+# [NOTIFYNL] ADDRESS_WINDOW_HEIGHT (40mm) matches the physical PostNL/Pingen envelope-window
+# cutout - correct for address_bounding_box's OTHER job (the printable-area/red-zone checks in
+# _overlay_printable_areas_of_address_block_page_with_white/_colour_no_print_areas_of_page_in_red,
+# which must know the full physical window so unrelated print content doesn't bleed into what
+# will show through the envelope). It is NOT the right size for OCR-based address-content
+# validation: a 6-line address only ever needs ~25mm, so the extra ~15mm of the full window
+# reliably swept in unrelated nearby content (a "Retouradres" line above, "Datum"/"Onderwerp"
+# below) and miscounted it as address lines - see the Den Haag SZW letter investigation,
+# 2026-08-31. This narrower height is used only for extract_address_block's line-count/content
+# check; it matches this window's own pre-2025-09-25 value (commit 872e76eb, "address redaction
+# removal", which widened it to the physical envelope size in the same change that stopped
+# redacting/rewriting the address block - that removal is intentional and stays; only the
+# validation window's height was miscalibrated by riding along with it).
+ADDRESS_TEXT_VALIDATION_HEIGHT = 26.8
+
+
+def address_text_validation_bounding_box(letter_address_placement):
+    top = address_top_from_top_of_page(letter_address_placement)
+    bottom = top + ADDRESS_TEXT_VALIDATION_HEIGHT
+    return fitz.Rect(
+        # add on a margin to ensure we capture all text
+        (ADDRESS_LEFT_FROM_LEFT_OF_PAGE - 3) * mm,  # x1
+        (top - 3) * mm,  # y1
+        (ADDRESS_RIGHT_FROM_LEFT_OF_PAGE + 3) * mm,  # x2
+        (bottom + 3) * mm,  # y2
+    )
+
+
 LOGO_LEFT_FROM_LEFT_OF_PAGE = BORDER_LEFT_FROM_LEFT_OF_PAGE
 LOGO_RIGHT_FROM_LEFT_OF_PAGE = SERVICE_ADDRESS_LEFT_FROM_LEFT_OF_PAGE
 LOGO_TOP_FROM_TOP_OF_PAGE = BORDER_TOP_FROM_TOP_OF_PAGE
@@ -926,7 +954,7 @@ def extract_address_block(pdf, letter_address_placement=DEFAULT_LETTER_ADDRESS_P
     :return: multi-line address string
     """
     return PrecompiledPostalAddress(
-        _extract_text_from_first_page_of_pdf(pdf, address_bounding_box(letter_address_placement))
+        _extract_text_from_first_page_of_pdf(pdf, address_text_validation_bounding_box(letter_address_placement))
     )
 
 
