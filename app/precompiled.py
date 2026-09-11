@@ -828,6 +828,10 @@ def _colour_no_print_areas_of_page_in_red(
     page.merge_page(new_pdf.pages[0])
 
 
+WHITE_TOLERANCE = 3  # per-channel RGB tolerance; a difference this small is imperceptible and can
+# be introduced by PDF merge/rasterisation noise rather than real letter content
+
+
 def _get_out_of_bounds_pages(src_pdf_bytes):
     """
     Checks each pixel of the image to determine the colour - if any pixel is not white return false
@@ -849,7 +853,8 @@ def _get_out_of_bounds_pages(src_pdf_bytes):
             continue
 
         for colour in colours:
-            if str(colour[1]) != "(255, 255, 255)":
+            r, g, b = colour[1]
+            if max(255 - r, 255 - g, 255 - b) > WHITE_TOLERANCE:
                 current_app.logger.warning("Letter exceeds boundaries on page %s", i, extra={"page_number": i})
                 yield i
                 break
