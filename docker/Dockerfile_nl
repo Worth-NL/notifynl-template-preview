@@ -36,6 +36,9 @@ COPY policy.xml .
 
 # Overwrite the default ImageMagick policy which doesn't allow reading or writing PDFs
 RUN rm /etc/ImageMagick-7/policy.xml && cp ./policy.xml /etc/ImageMagick-7/policy.xml
+
+RUN python -m pip uninstall -y pip
+
 WORKDIR /home/vcap/app
 
 ##### Python Build Image #####################################################
@@ -54,7 +57,7 @@ RUN echo "Install OS dependencies for python app requirements" && apt-get update
 COPY requirements_nl.txt .
 
 RUN echo "Installing python requirements" && \
-    python3 -m venv /opt/venv && \
+    python3 -m venv --without-pip /opt/venv && \
     uv pip sync --python /opt/venv/bin/python requirements_nl.txt
 
 COPY . .
