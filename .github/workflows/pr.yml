@@ -133,7 +133,7 @@ jobs:
       tag: ${{ steps.set-tag.outputs.tag }}
 
   deploy:
-    if: github.event.pull_request.draft == false
+    if: github.event.pull_request.draft == false && github.base_ref == 'develop'
     runs-on: ubuntu-latest
     needs: build
 
