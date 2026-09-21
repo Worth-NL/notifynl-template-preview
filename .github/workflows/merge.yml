@@ -34,7 +34,6 @@ jobs:
           activate-environment: true
           enable-cache: true
           cache-dependency-glob: |
-            requirements_nl_test.in
             requirements_nl_test.txt
 
       - name: Install application requirements
