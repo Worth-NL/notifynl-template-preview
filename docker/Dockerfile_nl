@@ -17,8 +17,9 @@ RUN echo "Install binary app dependencies" && \
     echo ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true | debconf-set-selections && \
     apt-get install -y --no-install-recommends \
         libcurl4 \
-        curl \
-        libpango1.0-dev=1.56.3-1 \
+        libpango-1.0-0=1.56.3-1 \
+        libpangoft2-1.0-0=1.56.3-1 \
+        libharfbuzz-subset0 \
         imagemagick=8:7.1.1.43+dfsg1-1+deb13u12 \
         ghostscript=10.05.1~dfsg-1+deb13u1 \
         poppler-utils=25.03.0-5+deb13u4 \
