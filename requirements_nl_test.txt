@@ -604,9 +604,9 @@ flask-redis==0.4.0 \
     # via
     #   -r requirements_nl.txt
     #   notifications-utils
-flask-weasyprint==1.1.0 \
-    --hash=sha256:aa2d08e0f788e76c930b101ab3c0b210e60c0d48a30eb0e326fb85d72d7e5509 \
-    --hash=sha256:d9ce11cd2c947ad196b53daab9ead59c4e67d8fb0c59039194faa70897e7fdc2
+flask-weasyprint==1.2.0 \
+    --hash=sha256:e45c66f0305c62510a78e199771a21d61e645dbd224ee614f7c02fdfc38c7a7c \
+    --hash=sha256:fc20a4fb5a18f311c98772a0b6c8428df345b15cdb2b356dff24962a4328287d
     # via -r requirements_nl.txt
 fonttools==4.61.0 \
     --hash=sha256:0011d640afa61053bc6590f9a3394bd222de7cfde19346588beabac374e9d8ac \
