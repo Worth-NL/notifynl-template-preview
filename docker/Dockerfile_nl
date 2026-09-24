@@ -1,3 +1,17 @@
+##### Microsoft Core Fonts ##################################################
+# Downloaded in a throwaway stage so the installer's wget/cabextract never end up in the image
+FROM python:3.13-slim-trixie AS fonts
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN echo "Download Microsoft core fonts" && \
+    sed -i 's/^Components: main$/Components: main contrib/' /etc/apt/sources.list.d/debian.sources && \
+    apt-get update && \
+    echo ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true | debconf-set-selections && \
+    apt-get install -y --no-install-recommends ttf-mscorefonts-installer && \
+    test -s /usr/share/fonts/truetype/msttcorefonts/Arial.ttf
+
+##### Base Image ##############################################################
 FROM python:3.13-slim-trixie AS base
 
 COPY --from=ghcr.io/astral-sh/uv:0.12 /uv /uvx /bin/
@@ -9,12 +23,11 @@ ENV UV_COMPILE_BYTECODE=1
 ENV VIRTUAL_ENV="/opt/venv"
 
 COPY --chmod=0755 docker/choom-wrap-pkgs.sh /usr/local/bin/choom-wrap-pkgs
+COPY --from=fonts /usr/share/fonts/truetype/msttcorefonts /usr/share/fonts/truetype/msttcorefonts
 
 RUN echo "Install binary app dependencies" && \
-    echo "deb http://deb.debian.org/debian trixie main contrib non-free" >> /etc/apt/sources.list && \
     apt-get update && \
     apt-get upgrade -y && \
-    echo ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true | debconf-set-selections && \
     apt-get install -y --no-install-recommends \
         libcurl4 \
         libpango-1.0-0=1.56.3-1 \
@@ -26,7 +39,6 @@ RUN echo "Install binary app dependencies" && \
         fonts-urw-base35=20200910-8 \
         fonts-freefont-ttf=20211204+svn4273-2 \
         fonts-wqy-zenhei \
-        ttf-mscorefonts-installer \
         make \
     && choom-wrap-pkgs 150 imagemagick-7.q16 ghostscript poppler-utils \
     && apt-get -y clean \
