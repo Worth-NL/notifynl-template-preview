@@ -34,7 +34,6 @@ jobs:
           activate-environment: true
           enable-cache: true
           cache-dependency-glob: |
-            requirements_nl_test.in
             requirements_nl_test.txt
 
       - name: Install application requirements
@@ -94,6 +93,7 @@ jobs:
           tags: ${{ env.IMAGE }}:latest,${{ env.IMAGE }}:${{ needs.build-tag-test.outputs.tag }}
           platforms: linux/amd64,linux/arm64
           provenance: false
+          target: production
 
       - uses: softprops/action-gh-release@v2
         with:

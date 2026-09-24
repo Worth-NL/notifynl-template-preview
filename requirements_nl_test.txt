@@ -604,9 +604,9 @@ flask-redis==0.4.0 \
     # via
     #   -r requirements_nl.txt
     #   notifications-utils
-flask-weasyprint==1.1.0 \
-    --hash=sha256:aa2d08e0f788e76c930b101ab3c0b210e60c0d48a30eb0e326fb85d72d7e5509 \
-    --hash=sha256:d9ce11cd2c947ad196b53daab9ead59c4e67d8fb0c59039194faa70897e7fdc2
+flask-weasyprint==1.2.0 \
+    --hash=sha256:e45c66f0305c62510a78e199771a21d61e645dbd224ee614f7c02fdfc38c7a7c \
+    --hash=sha256:fc20a4fb5a18f311c98772a0b6c8428df345b15cdb2b356dff24962a4328287d
     # via -r requirements_nl.txt
 fonttools==4.61.0 \
     --hash=sha256:0011d640afa61053bc6590f9a3394bd222de7cfde19346588beabac374e9d8ac \
@@ -926,9 +926,9 @@ markupsafe==3.0.2 \
     #   flask
     #   jinja2
     #   werkzeug
-mistune==0.8.4 \
-    --hash=sha256:59a3429db53c50b5c6bcc8a07f8848cb00d7dc8bdb431a4ab41920d201d4756e \
-    --hash=sha256:88a1051873018da288eee8538d476dffe1262495144b33ecb586c4ab266bb8d4
+mistune==3.3.3 \
+    --hash=sha256:99de1585e42dcbd826faa9e11a202727a5e202e4e4722a4c69ac1ff615793dd7 \
+    --hash=sha256:c4c6c0c840b8637a2e9b8b6d607eb7c8f00888bf14c754409bcd339e848c2477
     # via
     #   -r requirements_nl.txt
     #   notifications-utils
@@ -936,7 +936,7 @@ moto==5.1.18 \
     --hash=sha256:45298ef7b88561b839f6fe3e9da2a6e2ecd10283c7bf3daf43a07a97465885f9 \
     --hash=sha256:b65aa8fc9032c5c574415451e14fd7da4e43fd50b8bdcb5f10289ad382c25bcf
     # via -r requirements_nl_test.in
-notifications-utils @ git+https://github.com/Worth-NL/notifynl-utils.git@40e6af24df0a7e672098ff406d8dae0a0da7f621
+notifications-utils @ git+https://github.com/Worth-NL/notifynl-utils.git@cb66ced9f10e1e852d86a340a3cf0a8d7f5a95f8
     # via -r requirements_nl.txt
 opentelemetry-api==1.44.0 \
     --hash=sha256:67647e5e9566edcf421166fdf022b3537f818635daa852b289e34604dc6fb33a \
@@ -1369,9 +1369,9 @@ pymupdf==1.24.11 \
     --hash=sha256:745ce77532702d6ddeeecb47306d3669629aa5ff82708318cd652881f493b0ba \
     --hash=sha256:9b7ac5b8ec3daec17f2e830962ed091610e576a5e531d2fe28c437fbd69b1969
     # via -r requirements_nl.txt
-pypdf==6.14.2 \
-    --hash=sha256:3f07891af76dc002657e04993ab9b4de81de29f9013b9761d0b7968bff12e946 \
-    --hash=sha256:7873f502fe4385e79539b21d872392dc0c4e3714327c15881cbc7fbfd1f95b25
+pypdf==6.19.0 \
+    --hash=sha256:7e5d6e730e7dae87d560a2cee218b852f6498c8be61966f3cd02ead971e48d14 \
+    --hash=sha256:bbc43aca292369ccc6cbc8a921991ecf2538a3587ab5a116eff06c321d647155
     # via
     #   -r requirements_nl.txt
     #   notifications-utils
@@ -1827,9 +1827,9 @@ wcwidth==0.2.13 \
     # via
     #   -r requirements_nl.txt
     #   prompt-toolkit
-weasyprint==68.1 \
-    --hash=sha256:4dc3ba63c68bbbce3e9617cb2226251c372f5ee90a8a484503b1c099da9cf5be \
-    --hash=sha256:d3b752049b453a5c95edb27ce78d69e9319af5a34f257fa0f4c738c701b4184e
+weasyprint==70.0 \
+    --hash=sha256:5043e55e38d2a2af2b2b871e869697b1f65dad5f8b4a3677961d04ceacf9c5fe \
+    --hash=sha256:c263abf0e86c747b12af678b67f85f4abbfb97d18a20503031e7ba94e4b8cf8c
     # via
     #   -r requirements_nl.txt
     #   flask-weasyprint
