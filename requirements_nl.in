@@ -13,7 +13,6 @@ reportlab==4.4.9
 pdf2image==1.17.0
 PyMuPDF==1.24.11
 Flask-WeasyPrint==1.1.0
-WeasyPrint==68.1
 
 # Weasyprint subdependencies which are probably safe to bump but we can’t be sure
 pillow==12.3.0
@@ -54,3 +53,4 @@ opentelemetry-instrumentation-urllib3
 
 # [NOTIFYNL] vulnerability pins
 pypdf>=6.16.1
+WeasyPrint>=70.0
