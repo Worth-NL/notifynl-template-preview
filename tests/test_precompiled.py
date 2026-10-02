@@ -1,10 +1,11 @@
 import base64
 import io
 import logging
+import uuid
 from io import BytesIO
 from unittest.mock import ANY, MagicMock, call
 
-import fitz
+import pymupdf
 import pypdf
 import pytest
 from flask import url_for
@@ -15,11 +16,15 @@ from reportlab.lib.units import mm
 from reportlab.pdfgen import canvas
 
 from app.precompiled import (
+    A4_WIDTH,
     DEFAULT_LETTER_ADDRESS_PLACEMENT,
+    NOTIFY_TAG_BOUNDING_BOX,
     NotifyCanvas,
+    _no_intersect_with_notify_tag_bbox,
     _warn_if_filesize_has_grown,
     add_address_to_precompiled_letter,
     add_notify_tag_to_letter,
+    check_notify_tag_area_for_encroachment,
     extract_address_block,
     get_invalid_pages_with_message,
     is_notify_tag_present,
@@ -32,6 +37,9 @@ from tests.pdf_consts import (
     a5_size,
     address_block_repeated_on_second_page,
     address_margin,
+    address_where_paragraphs_do_not_match_visual_order,
+    address_with_large_space_in_a_line,
+    address_with_multiple_unusual_coordinates,
     address_with_unusual_coordinates,
     already_has_notify_tag,
     bad_postcode,
@@ -248,13 +256,13 @@ def test_get_invalid_pages_second_page(x, y, expected_failed, client):
         # under the citizen address block:
         (24.6 * mm, (297 - 90) * mm, 1, ("content-outside-printable-area", [1])),
         (24.6 * mm, (297 - 90) * mm, 2, ("", [])),  # Same place on page 2 should be ok
-        # [NOTIFYNL] new margins don't return an error, this fails
-        # (
-        #     24.6 * mm,
-        #     (297 - 39) * mm,
-        #     1,
-        #     ("content-outside-printable-area", [1]),
-        # ),  # under the logo
+        pytest.param(
+            24.6 * mm,
+            (297 - 39) * mm,
+            1,
+            ("content-outside-printable-area", [1]),
+            marks=pytest.mark.skip(reason="[NOTIFYNL] NL margins allow content here, so no error is returned"),
+        ),  # under the logo
         (24.6 * mm, (297 - 39) * mm, 2, ("", [])),  # Same place on page 2 should be ok
         # [NOTIFYNL] regression test for the gap between LOGO_BOTTOM_FROM_TOP_OF_PAGE and
         # ADDRESS_TOP_FROM_TOP_OF_PAGE left uncovered between the 2025-10-02 margin change
@@ -754,7 +762,7 @@ def test_is_notify_tag_calls_extract_with_wider_numbers(mocker):
 
     is_notify_tag_present(pdf)
 
-    mock_extract.assert_called_once_with(pdf, fitz.Rect(0.0, 0.0, 15.191 * mm, 6.149 * mm))
+    mock_extract.assert_called_once_with(pdf, pymupdf.Rect(0.0, 0.0, 15.191 * mm, 6.149 * mm))
 
 
 @pytest.mark.skip(reason="[NOTIFYNL] Broken by validation change")
@@ -763,7 +771,7 @@ def test_is_notify_tag_calls_extract_with_wider_numbers(mocker):
     [(example_dwp_pdf, "testington"), (valid_letter, "buckingham palace")],
     ids=["example_dwp_pdf", "valid_letter"],
 )
-def test_rewrite_address_block_end_to_end(pdf_data, address_snippet):
+def test_rewrite_address_block_end_to_end(pdf_data, address_snippet, client):
     new_pdf, address = rewrite_address_block(
         BytesIO(pdf_data),
         page_count=1,
@@ -774,7 +782,7 @@ def test_rewrite_address_block_end_to_end(pdf_data, address_snippet):
     assert address_snippet in address.lower()
 
 
-def test_extract_address_block():
+def test_extract_address_block(client):
     # fixture's address block is laid out at the 50mm position
     assert extract_address_block(BytesIO(example_dwp_pdf), letter_address_placement="50mm").raw_address == "\n".join(
         [
@@ -788,21 +796,58 @@ def test_extract_address_block():
 
 @pytest.mark.skip(reason="[NOTIFYNL] Broken by validation change")
 def test_extract_address_block_handles_address_with_ligatures_in_different_fonts(client, caplog):
-    # we've seen some cases where addresses can sometimes be split into too many lines - this test is incorrect
-    # in that "quick maffs defied" should be on one line, but we're documenting this before fixing so we can understand
-    # impacts on other addresses before fixing the algorithm
+    # "quick maffs defied" should be on the same line. If address lines are grouped by line, this works correctly.
+    # If address lines are grouped by y2, the address is not split up correctly.
     assert extract_address_block(BytesIO(address_with_unusual_coordinates)).raw_address == "\n".join(
         [
             "First line",
-            # these three _should_ be on the same line
-            "quick",
-            "maffs",  # note that the ﬀ ligature here has been converted into two f characters
-            "defied",
+            "quick maffs defied",  # note that the ﬀ ligature here has been converted into two f characters
             "SE1 1AA",
         ]
     )
-    # at least make sure we're logging this for now
-    assert "Address extraction different between y2 and get_text" in caplog.messages
+
+
+@pytest.mark.skip(reason="[NOTIFYNL] UK-positioned fixture falls outside the NL address window; see _nl twins")
+def test_extract_address_block_handles_address_with_different_coordinates(client, caplog):
+    # If address lines are grouped by y2 this gets split into too many lines.
+    # When grouped by line, it is split correctly into 4 lines.
+    assert extract_address_block(BytesIO(address_with_multiple_unusual_coordinates)).raw_address == "\n".join(
+        [
+            "Recipient SURNAME",
+            "My Street,",
+            "My Town,",
+            "SW1A 1AA",
+        ]
+    )
+    assert "Address extraction different when splitting address by y2 vs by line" in caplog.messages
+
+
+@pytest.mark.skip(reason="[NOTIFYNL] UK-positioned fixture falls outside the NL address window; see _nl twins")
+def test_extract_address_block_handles_address_with_a_large_amount_of_whitespace_in_the_line():
+    # The PDF has a large space between the words "My" and "Recipient," on the first line.
+    # These should still be considered the same line by PyMuPDF, but this is to check if there are line
+    # detection differences between versions which affect us.
+    assert extract_address_block(BytesIO(address_with_large_space_in_a_line)).raw_address == "\n".join(
+        [
+            "My Recipient,",
+            "My House,",
+            "My Street,",
+            "My Town,",
+            "SW1A 1AA",
+        ]
+    )
+
+
+@pytest.mark.skip(reason="[NOTIFYNL] UK-positioned fixture falls outside the NL address window; see _nl twins")
+def test_extract_address_block_when_address_paragraphs_do_not_match_visual_order(client):
+    # This test documents a current rare edge case where address extraction doesn't behave as we want due.
+    # Visually, the address is ordered "normally" with the postcode on the last line and user name on line 1.
+    # In the underlying structure of the PDF, which PyMyPDF uses to split up the address, the order is different.
+    # Each address line is its own paragraph, and these are ordered differently from the visual order.
+    # The address we extract follows the structure of the PDF, not the visual order.
+    assert extract_address_block(BytesIO(address_where_paragraphs_do_not_match_visual_order)).raw_address == "\n".join(
+        ["County", "My User", "SW1 1AA", "42 The Parkway", "City"]
+    )
 
 
 def test_add_address_to_precompiled_letter_puts_address_on_page():
@@ -834,7 +879,7 @@ def test_add_address_to_precompiled_letter_puts_address_on_page():
         ),
     ],
 )
-def test_redact_precompiled_letter_address_block_redacts_address_block(pdf, expected_address):
+def test_redact_precompiled_letter_address_block_redacts_address_block(pdf, expected_address, client):
     address = extract_address_block(BytesIO(pdf))
     raw_address = address.raw_address.replace("\n", "")
     assert raw_address == expected_address
@@ -851,7 +896,7 @@ def test_redact_address_block_preserves_addresses_elsewhere_on_page():
     )
     assert extract_address_block(new_pdf).raw_address == ""
 
-    doc = fitz.open("pdf", new_pdf)
+    doc = pymupdf.open("pdf", new_pdf)
     new_page_text = doc[0].get_text()
     assert address.raw_address in new_page_text
 
@@ -861,7 +906,7 @@ def test_redact_precompiled_letter_address_block_only_touches_first_page():
     address = extract_address_block(BytesIO(address_block_repeated_on_second_page), letter_address_placement="50mm")
     assert address.raw_address != ""  # check something is there before we redact
 
-    doc = fitz.open("pdf", address_block_repeated_on_second_page)
+    doc = pymupdf.open("pdf", address_block_repeated_on_second_page)
     second_page_text = doc[1].get_text()
 
     new_pdf = redact_precompiled_letter_address_block(
@@ -870,7 +915,7 @@ def test_redact_precompiled_letter_address_block_only_touches_first_page():
     )
     assert extract_address_block(new_pdf, letter_address_placement="50mm").raw_address == ""
 
-    doc = fitz.open("pdf", new_pdf)
+    doc = pymupdf.open("pdf", new_pdf)
     new_second_page_text = doc[1].get_text()
 
     assert len(doc) == 2
@@ -948,3 +993,258 @@ def test_warn_if_filesize_has_grown(client, caplog, orig_filesize, new_filesize,
         assert len(caplog.records) == 1
         assert caplog.records[0].levelno == expected_lvl
         assert caplog.records[0].message == expected_msg
+
+
+@pytest.mark.parametrize(
+    "bbox, expected_result",
+    [
+        # Inside Notify tag area
+        (
+            (
+                NOTIFY_TAG_BOUNDING_BOX.x0 + 0.5,
+                NOTIFY_TAG_BOUNDING_BOX.y0 + 0.5,
+                NOTIFY_TAG_BOUNDING_BOX.x1 - 1,
+                NOTIFY_TAG_BOUNDING_BOX.y1 - 1,
+            ),
+            False,
+        ),
+        # Touches the boundary to the right - No intersect with Notify tag area
+        (
+            (
+                NOTIFY_TAG_BOUNDING_BOX.x1,
+                NOTIFY_TAG_BOUNDING_BOX.y1,
+                (A4_WIDTH * mm) - 2,
+                NOTIFY_TAG_BOUNDING_BOX.y1,
+            ),
+            True,
+        ),
+        # overlapping Notify tag area to the right
+        (
+            (
+                NOTIFY_TAG_BOUNDING_BOX.x1 - 5,
+                NOTIFY_TAG_BOUNDING_BOX.y0 + 1,
+                NOTIFY_TAG_BOUNDING_BOX.x1 + 10,
+                NOTIFY_TAG_BOUNDING_BOX.y1 - 1,
+            ),
+            False,
+        ),
+        # Completely to the right of Notify tag area
+        (
+            (
+                A4_WIDTH * mm - 10,
+                NOTIFY_TAG_BOUNDING_BOX.y0 + 1,
+                A4_WIDTH * mm - 1,
+                NOTIFY_TAG_BOUNDING_BOX.y1 - 1,
+            ),
+            True,
+        ),
+        # Touches the bottom boundary - No intersect with Notify tag area
+        (
+            (
+                NOTIFY_TAG_BOUNDING_BOX.x0,
+                NOTIFY_TAG_BOUNDING_BOX.y1,
+                NOTIFY_TAG_BOUNDING_BOX.x1,
+                NOTIFY_TAG_BOUNDING_BOX.y1 + 10,
+            ),
+            True,
+        ),
+        # Completely below the bottom boundaries
+        (
+            (
+                NOTIFY_TAG_BOUNDING_BOX.x0,
+                NOTIFY_TAG_BOUNDING_BOX.y1 + 1,
+                A4_WIDTH * mm - 1,
+                NOTIFY_TAG_BOUNDING_BOX.y1 + 10,
+            ),
+            True,
+        ),
+        # Overlaps bottom boundary
+        (
+            (
+                NOTIFY_TAG_BOUNDING_BOX.x0 + 1,
+                NOTIFY_TAG_BOUNDING_BOX.y1 - 1,
+                A4_WIDTH * mm - 1,
+                NOTIFY_TAG_BOUNDING_BOX.y1 + 10,
+            ),
+            False,
+        ),
+        # Touches left boundary but doesn't intersect with Notify tag area
+        (
+            (
+                NOTIFY_TAG_BOUNDING_BOX.x0 - 10,
+                NOTIFY_TAG_BOUNDING_BOX.y1 + 1,
+                NOTIFY_TAG_BOUNDING_BOX.x0,
+                NOTIFY_TAG_BOUNDING_BOX.y1 - 1,
+            ),
+            True,
+        ),
+        # Completely to the left - defensive test,
+        (
+            (
+                NOTIFY_TAG_BOUNDING_BOX.x0 - 10,
+                NOTIFY_TAG_BOUNDING_BOX.y0 + 1,
+                NOTIFY_TAG_BOUNDING_BOX.x0 - 1,
+                NOTIFY_TAG_BOUNDING_BOX.y1 - 1,
+            ),
+            True,
+        ),
+        # Overlaps to the left - defensive test
+        (
+            (
+                NOTIFY_TAG_BOUNDING_BOX.x0 - 10,
+                NOTIFY_TAG_BOUNDING_BOX.y0 + 1,
+                NOTIFY_TAG_BOUNDING_BOX.x0 + 1,
+                NOTIFY_TAG_BOUNDING_BOX.y1 - 1,
+            ),
+            False,
+        ),
+        # touches boundary above Notify tag area - defensive test,
+        (
+            (
+                NOTIFY_TAG_BOUNDING_BOX.x0 - 10,
+                NOTIFY_TAG_BOUNDING_BOX.y0 + 1,
+                A4_WIDTH * mm - 1,
+                NOTIFY_TAG_BOUNDING_BOX.y0,
+            ),
+            True,
+        ),
+        # Completely above Notify tag area - defensive test
+        (
+            (
+                NOTIFY_TAG_BOUNDING_BOX.x0 + 1,
+                NOTIFY_TAG_BOUNDING_BOX.y0 - 10,
+                NOTIFY_TAG_BOUNDING_BOX.x1,
+                NOTIFY_TAG_BOUNDING_BOX.y0 - 1,
+            ),
+            True,
+        ),
+        # Overlaps the top of Notify tag - defensive test
+        (
+            (
+                NOTIFY_TAG_BOUNDING_BOX.x0 + 1,
+                NOTIFY_TAG_BOUNDING_BOX.y0 - 10,
+                NOTIFY_TAG_BOUNDING_BOX.x1 + 10,
+                NOTIFY_TAG_BOUNDING_BOX.y0 + 1,
+            ),
+            False,
+        ),
+    ],
+)
+def test__no_intersect_with_notify_tag_bbox(bbox, expected_result):
+    """
+    The test cases focus on the main boundaries, x0,y0 and y1 in sets of touching, overlapping and completely beyond
+    those boundary tests.
+    """
+    assert _no_intersect_with_notify_tag_bbox(bbox) is expected_result
+
+
+encroachment_characters_to_test = [
+    # The tuples here contain the inserted text and what will be extracted by PyMuPDF
+    "misplaced text",  # rendered as invisible/hidden for the test
+    " Notify",
+    "Notify ",
+    "SomethingsomethingNotify",
+    # --- Standard Whitespace & Formatting (Supported in WinAnsi) ---
+    " ",  # standard space
+    "\t",  # tab character
+    "\ntext",  # newline character
+    "\r\ntext",  # carriage return newline
+    "\u00a0",  # non-breaking space, (PyMuPDF maps to " ")
+    "\u00ad",  # soft hyphen (PyMuPDF maps to '-')
+    # --- Unsupported Unicode Control Characters (PyMuPDF converts to '·') ---
+    "\u200b",  # zero width space
+    "\u200c",  # zero width non-joiner
+    "\u200d",  # zero width joiner
+    "\ufeff",  # byte order mark
+    "\u2060",  # word joiner
+    "\u200e",  # left-to-right mark
+    "\u200f",  # right-to-left mark
+    "\u3164",  # hangul filler
+    "\u2800",  # braille pattern blank
+    "\u3000",  # ideographic space
+]
+
+
+@pytest.mark.parametrize("encroaching_character", encroachment_characters_to_test)
+def test_check_notify_tag_area_for_encroachment(encroaching_character):
+    # create new document from the test blank_with_address pdf and load into memory
+    test_encroachment_file = pymupdf.open(stream=already_has_notify_tag, filetype="PDF")
+    page = test_encroachment_file[0]
+    # insert an invisible character into the usual Notify tag area
+
+    page.insert_text(
+        (NOTIFY_TAG_BOUNDING_BOX.x0 + 5, NOTIFY_TAG_BOUNDING_BOX.y0 + 10),
+        encroaching_character,
+        fontsize=10,
+        fontname="helv",
+        render_mode=3,  # makes the text "invisible" ie hidden
+    )
+
+    test_encroachment_file_data = BytesIO(test_encroachment_file.tobytes())
+    test_encroachment_file.close()
+
+    # The various coordinates being tested mean sometimes just part of the encroaching text is returned
+    # PyMuPDF also returns different renderings of non text characters.
+    # It is more straight forward to test that an encroachment is triggered
+    assert check_notify_tag_area_for_encroachment(test_encroachment_file_data) is not None
+
+
+@pytest.mark.parametrize(
+    "valid_pdf_file",
+    [
+        valid_letter,
+        blank_with_address,
+        already_has_notify_tag,
+        notify_tag_on_first_page,
+        address_with_multiple_unusual_coordinates,
+        address_with_large_space_in_a_line,
+        content_up_to_boundary_edges,
+        portrait_rotated_page,
+        landscape_oriented_page,
+    ],
+)
+def test_check_notify_tag_area_for_encroachment_returns_no_encroachment_for_valid_pdf_files(valid_pdf_file):
+    valid_pdf_file_data = BytesIO(valid_pdf_file)
+    assert check_notify_tag_area_for_encroachment(valid_pdf_file_data) is None
+
+
+@pytest.mark.skip(reason="[NOTIFYNL] UK fixture address fails NL validation before the check runs; see _nl twin")
+@pytest.mark.parametrize(
+    "encroaching_character, expected_logged_result",
+    [
+        ("John Doe", "J"),  # handling of capture of PII data
+        (" ", " "),
+        ("  ", " "),
+        ("\t", "\\t"),
+    ],
+)
+def test_sanitise_precompiled_letter_with_invisible_characters_encroaching_on_notify_tag_area_logging(
+    client, auth_header, caplog, encroaching_character, expected_logged_result
+):
+    filename = str(uuid.uuid4())
+    query_string = "?upload_id=" + filename
+    test_encroachment_file = pymupdf.open(stream=already_has_notify_tag, filetype="PDF")
+    page = test_encroachment_file[0]
+
+    # insert an invisible character into the usual Notify tag area
+    page.insert_text(
+        (NOTIFY_TAG_BOUNDING_BOX.x0 + 5, NOTIFY_TAG_BOUNDING_BOX.y0 + 10),
+        encroaching_character,
+        fontsize=10,
+        fontname="helv",
+        render_mode=3,  # makes the text "invisible" ie hidden
+    )
+
+    test_encroachment_file_data = BytesIO(test_encroachment_file.tobytes())
+    test_encroachment_file.close()
+
+    response = client.post(
+        url_for("precompiled_blueprint.sanitise_precompiled_letter") + query_string,
+        data=test_encroachment_file_data,
+        headers={"Content-type": "application/json", **auth_header},
+    )
+    assert response.status_code == 200
+    message = (
+        f"precompiled pdf:({filename}) has character:('{expected_logged_result}'), encroaching on the Notify tag area."
+    )
+    assert message in caplog.messages
