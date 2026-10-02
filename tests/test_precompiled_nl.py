@@ -1,12 +1,21 @@
+import unicodedata
+import uuid
 from io import BytesIO
 from unittest.mock import MagicMock
 
+import pymupdf
 import pytest
 from flask import url_for
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.units import mm
+from reportlab.pdfgen import canvas
 
 from app import ValidationFailed
 from app.precompiled import (
+    ADDRESS_LEFT_FROM_LEFT_OF_PAGE,
+    NOTIFY_TAG_BOUNDING_BOX,
     _other_letter_address_placement,
+    check_notify_tag_area_for_encroachment,
     extract_address_block,
     rewrite_address_block,
 )
@@ -191,3 +200,143 @@ def test_add_address_to_precompiled_letter_with_retouradres_extracts_untouched_r
     address = extract_address_block(BytesIO(address_50mm_with_retouradres), letter_address_placement="50mm")
 
     assert address.raw_address.startswith("Retouradres: Postbus 70013, 3000 KR ROTTERDAM")
+
+
+NL_LETTERS_WITH_PLACEMENT = [
+    (address_50mm_no_retouradres, "50mm"),
+    (address_60mm_no_retouradres, "60mm"),
+    (address_50mm_with_retouradres, "50mm"),
+    (address_60mm_with_retouradres, "60mm"),
+]
+
+
+@pytest.mark.parametrize("pdf, letter_address_placement", NL_LETTERS_WITH_PLACEMENT)
+def test_check_notify_tag_area_for_encroachment_passes_nl_letters(pdf, letter_address_placement):
+    assert check_notify_tag_area_for_encroachment(BytesIO(pdf)) is None
+
+
+@pytest.mark.parametrize("pdf, letter_address_placement", NL_LETTERS_WITH_PLACEMENT)
+def test_sanitise_precompiled_nl_letter_does_not_log_notify_tag_area_encroachment(
+    client, auth_header, caplog, pdf, letter_address_placement
+):
+    response = client.post(
+        url_for("precompiled_blueprint.sanitise_precompiled_letter")
+        + f"?upload_id={uuid.uuid4()}&letter_address_placement={letter_address_placement}",
+        data=pdf,
+        headers={"Content-type": "application/json", **auth_header},
+    )
+
+    assert response.status_code == 200
+    assert not [message for message in caplog.messages if "encroaching on the Notify tag area" in message]
+
+
+@pytest.mark.parametrize(
+    "encroaching_character, expected_logged_result",
+    [
+        ("Jan de Vries", "J"),  # only the first character is logged, to avoid logging PII
+        (" ", " "),
+        ("  ", " "),
+        ("\t", "\\t"),
+    ],
+)
+def test_sanitise_precompiled_nl_letter_with_invisible_characters_encroaching_on_notify_tag_area_logging(
+    client, auth_header, caplog, encroaching_character, expected_logged_result
+):
+    filename = str(uuid.uuid4())
+    letter = pymupdf.open(stream=address_50mm_no_retouradres, filetype="PDF")
+    letter[0].insert_text(
+        (NOTIFY_TAG_BOUNDING_BOX.x0 + 5, NOTIFY_TAG_BOUNDING_BOX.y0 + 10),
+        encroaching_character,
+        fontsize=10,
+        fontname="helv",
+        render_mode=3,  # invisible text
+    )
+    letter_data = letter.tobytes()
+    letter.close()
+
+    response = client.post(
+        url_for("precompiled_blueprint.sanitise_precompiled_letter")
+        + f"?upload_id={filename}&letter_address_placement=50mm",
+        data=letter_data,
+        headers={"Content-type": "application/json", **auth_header},
+    )
+
+    assert response.status_code == 200
+    assert (
+        f"precompiled pdf:({filename}) has character:('{expected_logged_result}'), encroaching on the Notify tag area."
+        in caplog.messages
+    )
+
+
+SIX_LINE_DUTCH_ADDRESS = [
+    "Mevrouw A.B. van den Berg-de Jong",
+    "Stichting Wijkcentrum De Linde",
+    "t.a.v. de financiële administratie",
+    "Kamer 2.14",
+    "Lange Voorhout 12 A",
+    "2514 EE  DEN HAAG",
+]
+
+
+def _six_line_address_letter(letter_address_placement, split_first_line=None, split_second_line_font_sizes=False):
+    """A letter with SIX_LINE_DUTCH_ADDRESS in the address window for the given placement.
+
+    split_first_line draws "Mevrouw" and the rest of line 1 as two separate text pieces, that many mm
+    apart (like mail-merge fields). split_second_line_font_sizes draws line 2 in two font sizes.
+    """
+    buffer = BytesIO()
+    letter = canvas.Canvas(buffer, pagesize=A4)
+    x = ADDRESS_LEFT_FROM_LEFT_OF_PAGE * mm
+    top = float(letter_address_placement.removesuffix("mm"))
+    for i, line in enumerate(SIX_LINE_DUTCH_ADDRESS):
+        y = A4[1] - (top + 5 + i * 5) * mm
+        letter.setFont("Helvetica", 9)
+        if i == 0 and split_first_line is not None:
+            first, rest = line.split(" ", 1)
+            letter.drawString(x, y, first)
+            letter.drawString(x + letter.stringWidth(f"{first} ", "Helvetica", 9) + split_first_line * mm, y, rest)
+        elif i == 1 and split_second_line_font_sizes:
+            first, rest = line.split(" De ")
+            letter.drawString(x, y, f"{first} ")
+            letter.setFont("Helvetica-Bold", 11)
+            letter.drawString(x + letter.stringWidth(f"{first} ", "Helvetica", 9), y, f"De {rest}")
+        else:
+            letter.drawString(x, y, line)
+    letter.save()
+    return buffer.getvalue()
+
+
+@pytest.mark.parametrize("letter_address_placement", ["50mm", "60mm"])
+def test_extract_address_block_reads_six_line_dutch_address(client, letter_address_placement):
+    address = extract_address_block(
+        BytesIO(_six_line_address_letter(letter_address_placement)),
+        letter_address_placement=letter_address_placement,
+    )
+
+    assert address.error_code is None
+    # extraction normalises to NFKD, which decomposes "ë" into "e" + a combining diaeresis
+    assert address.normalised_lines == [unicodedata.normalize("NFKD", line) for line in SIX_LINE_DUTCH_ADDRESS]
+
+
+@pytest.mark.parametrize("letter_address_placement", ["50mm", "60mm"])
+def test_extract_address_block_keeps_line_with_mixed_font_sizes_together(client, letter_address_placement):
+    address = extract_address_block(
+        BytesIO(_six_line_address_letter(letter_address_placement, split_second_line_font_sizes=True)),
+        letter_address_placement=letter_address_placement,
+    )
+
+    assert address.error_code is None
+    assert address.normalised_lines[1] == "Stichting Wijkcentrum De Linde"
+
+
+def test_extract_address_block_line_drawn_as_separate_pieces_is_split_and_logged(client, caplog):
+    # Documents the known weakness of grouping by line: an address line drawn as separate text pieces
+    # (e.g. mail-merge fields) becomes two lines, which pushes a 6-line address over the limit.
+    # Grouping by y2 keeps it together, so the log line lets us see how often this happens.
+    address = extract_address_block(
+        BytesIO(_six_line_address_letter("50mm", split_first_line=10)),
+        letter_address_placement="50mm",
+    )
+
+    assert address.error_code == "too-many-address-lines"
+    assert "Address extraction different when splitting address by y2 vs by line" in caplog.messages
