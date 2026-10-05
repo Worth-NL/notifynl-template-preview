@@ -93,6 +93,12 @@ class TestPDFLibraryErrors:
         fake_kibana_handler.level = logging.NOTSET
 
         mocker.patch.object(app.logger, "handlers", [fake_kibana_handler])
+        # [NOTIFYNL] configure_global_logging changes the real root logger; give it a throwaway handler
+        # list and level so the mock handler isn't left attached for the rest of the session, which
+        # segfaults the test run at interpreter exit once later tests have logged through it.
+        root_logger = logging.getLogger()
+        mocker.patch.object(root_logger, "handlers", [])
+        mocker.patch.object(root_logger, "level", root_logger.level)
 
         configure_global_logging(app)
 
