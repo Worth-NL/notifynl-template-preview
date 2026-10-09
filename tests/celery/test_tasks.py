@@ -446,6 +446,7 @@ def test_create_pdf_for_templated_letter_happy_path(
     mocker,
     client,
     data_for_create_pdf_for_templated_letter_task,
+    mock_weasyprint_logos,
     key_type,
     bucket_name,
     logo_filename,
@@ -758,7 +759,7 @@ def test_create_pdf_for_templated_letter_boto_error(
 
 @pytest.mark.skip(reason="[NOTIFYNL] AWS permissions break test.")
 def test_create_pdf_for_templated_letter_when_letter_is_too_long(
-    mocker, client, data_for_create_pdf_for_templated_letter_task, caplog
+    mocker, client, data_for_create_pdf_for_templated_letter_task, caplog, mock_weasyprint_logos
 ):
     # create a pdf for templated letter using data from API, upload the pdf to the final S3 bucket,
     # and send data back to API so that it can update notification status and billable units.

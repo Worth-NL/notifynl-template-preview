@@ -12,10 +12,20 @@ valid_letter = file("tests/test_pdfs/valid_letter.pdf")
 blank_with_address = file("tests/test_pdfs/blank_with_address.pdf")
 already_has_notify_tag = file("tests/test_pdfs/already_has_notify_tag.pdf")
 address_with_unusual_coordinates = file("tests/test_pdfs/address_with_unusual_coordinates.pdf")
+address_with_multiple_unusual_coordinates = file("tests/test_pdfs/address_with_multiple_unusual_coordinates.pdf")
+address_with_large_space_in_a_line = file("tests/test_pdfs/address_with_large_space_in_a_line.pdf")
 content_up_to_boundary_edges = file("tests/test_pdfs/content_up_to_boundary_edges.pdf")
+
+# invalid address, due to line order getting mixed up when address is extracted
+address_where_paragraphs_do_not_match_visual_order = file(
+    "tests/test_pdfs/address_where_paragraphs_do_not_match_visual_order.pdf"
+)
 
 # unable-to-read-file
 not_pdf = file("tests/test_pdfs/invalid-svg-file.svg")
+
+# this is also not a pdf
+hm_government_svg = file("tests/test_pdfs/hm-government.svg")
 
 # no metadata for logging
 pdf_with_no_metadata = file("tests/test_pdfs/pdf_with_no_metadata.pdf")

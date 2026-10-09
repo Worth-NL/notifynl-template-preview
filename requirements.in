@@ -5,12 +5,11 @@ kombu @ git+https://github.com/celery/kombu.git@860e40a6c904c4d8551577d9f4e8c00f
 pycurl==7.45.7
 
 # PDF libraries (manual testing needed to bump these)
-wand==0.6.13
+wand==0.7.2
 pypdf==3.13.0  # pypdf can't be bumped past 3.13 until we figure out why it caused https://govuk.zendesk.com/agent/tickets/5555290
 reportlab==4.4.9
 pdf2image==1.17.0
-PyMuPDF==1.24.11
-Flask-WeasyPrint==1.1.0
+PyMuPDF==1.28.2
 WeasyPrint==68.1
 
 # Weasyprint subdependencies which are probably safe to bump but we can’t be sure
@@ -27,7 +26,7 @@ Flask-HTTPAuth~=4.8
 sentry-sdk[flask,celery]~=1.45
 
 # Run `make bump-utils` to update to the latest version
-notifications-utils @ git+https://github.com/alphagov/notifications-utils.git@115.0.2
+notifications-utils @ git+https://github.com/alphagov/notifications-utils.git@130.0.0
 
 git+https://github.com/alphagov/gds_metrics_python.git@6f1840a57b6fb1ee40b7e84f2f18ec229de8aa72
 

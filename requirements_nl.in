@@ -5,13 +5,13 @@ kombu @ git+https://github.com/celery/kombu.git@860e40a6c904c4d8551577d9f4e8c00f
 pycurl==7.45.7
 
 # PDF libraries (manual testing needed to bump these)
-wand==0.6.13
+wand==0.7.2
 # pypdf kept ahead of upstream's cautious 3.13 pin - NL bumped past the printable-area
 # bug described below and hasn't hit it since
 # https://govuk.zendesk.com/agent/tickets/5555290
 reportlab==4.4.9
 pdf2image==1.17.0
-PyMuPDF==1.24.11
+PyMuPDF==1.28.2
 
 # Weasyprint subdependencies which are probably safe to bump but we can’t be sure
 pillow==12.3.0
@@ -27,7 +27,7 @@ Flask-HTTPAuth~=4.8
 sentry-sdk[flask,celery]~=1.45
 
 # Run `make bump-utils` to update to the latest version
-notifications-utils @ git+https://github.com/Worth-NL/notifynl-utils.git@101.3.2
+notifications-utils @ git+https://github.com/Worth-NL/notifynl-utils.git@102.0.0
 
 git+https://github.com/alphagov/gds_metrics_python.git@6f1840a57b6fb1ee40b7e84f2f18ec229de8aa72
 
@@ -53,4 +53,4 @@ opentelemetry-instrumentation-urllib3
 # [NOTIFYNL] vulnerability pins
 pypdf>=6.16.1
 WeasyPrint>=70.0
-Flask-WeasyPrint==1.2.0
+urllib3>=2.8.0

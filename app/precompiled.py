@@ -5,7 +5,7 @@ from io import BytesIO
 from itertools import groupby
 from operator import itemgetter
 
-import fitz
+import pymupdf
 import sentry_sdk
 from flask import Blueprint, current_app, jsonify, request, send_file
 from notifications_utils.pdf import is_letter_too_long, pdf_page_count
@@ -40,7 +40,7 @@ NOTIFY_TAG_BOUNDING_BOX_HEIGHT = 6.149
 NOTIFY_TAG_FONT_SIZE = 6
 NOTIFY_TAG_LINE_HEIGHT = NOTIFY_TAG_FONT_SIZE * PT_TO_MM
 NOTIFY_TAG_TEXT = "NOTIFY"
-NOTIFY_TAG_BOUNDING_BOX = fitz.Rect(
+NOTIFY_TAG_BOUNDING_BOX = pymupdf.Rect(
     # add on a margin to ensure we capture all text
     0,  # x1
     0,  # y1
@@ -121,7 +121,7 @@ def address_bottom_from_top_of_page(letter_address_placement):
 def address_bounding_box(letter_address_placement):
     top = address_top_from_top_of_page(letter_address_placement)
     bottom = address_bottom_from_top_of_page(letter_address_placement)
-    return fitz.Rect(
+    return pymupdf.Rect(
         # add on a margin to ensure we capture all text
         (ADDRESS_LEFT_FROM_LEFT_OF_PAGE - 3) * mm,  # x1
         (top - 3) * mm,  # y1
@@ -343,6 +343,21 @@ def sanitise_file_contents(
                 letter_address_placement=letter_address_placement,
             )
 
+            # Check if there are encroaching invisible/hidden characters on the Notify tag area and log the event.
+            # The strategy is to simply log incidents of invisible/hidden text/characters encroaching on the Notify tag
+            # area for now in order to monitor and fine tune the algorithm.
+            # The first character of the encroaching text will be logged to avoid PII issues and to aid the evaluation
+            # of the checks, ie "text" would be logged as "t" and "   " as " ".
+            encroaching_text = check_notify_tag_area_for_encroachment(file_data)
+            if encroaching_text:
+                encroaching_character = repr(encroaching_text[0])  # handles displaying invisible characters in the logs
+                current_app.logger.warning(
+                    "precompiled pdf:(%s) has character:(%s), encroaching on the Notify tag area.",
+                    filename,
+                    encroaching_character,
+                    extra={"file_name": filename, "encroaching_character": encroaching_character},
+                )
+
         raw_file = file_data.read()
 
         _warn_if_filesize_has_grown(orig_filesize=len(encoded_string), new_filesize=len(raw_file), filename=filename)
@@ -526,6 +541,88 @@ def log_metadata_for_letter(src_pdf, filename):
             extra,
             extra=extra,
         )
+
+
+def _no_intersect_with_notify_tag_bbox(bbox):
+    """
+    Returns True if a bbox does not intersect with the scanned area which is the NOTIFY_TAG_BOUNDING_BOX.
+    There have been instances where a letter was rejected by DVLA when an invisible character was found well outside the
+    NOTIFY_TAG_BOUNDING_BOX but to the right of the NOTIFY_TAG_BOUNDING_BOX. Attempts to expand the area to the right
+    have caused issues, because there are valid PDFs (not rejected by DVLA) that have white spaces at the extreme top
+    right of the page as a by presumably an artifact of their construction.
+    This solution is limited to encroachment into the NOTIFY_TAG_BOUNDING_BOX.
+    Any future incidents of invisible text outside the  NOTIFY_TAG_BOUNDING_BOX causing problems can be addressed then.
+    There is defensive code to check for the areas to the left and above the NOTIFY_TAG_BOUNDING_BOX to catch any
+    intrusions because even though the bounding box should technically starts at 0,0, in reality there are offsets.
+    The comparison excludes bboxes that touch the boundary of the scanned area but don't overlap.
+    """
+
+    t_x0 = NOTIFY_TAG_BOUNDING_BOX.x0
+    t_y0 = NOTIFY_TAG_BOUNDING_BOX.y0
+    t_x1 = NOTIFY_TAG_BOUNDING_BOX.x1
+    t_y1 = NOTIFY_TAG_BOUNDING_BOX.y1
+
+    return (
+        bbox[2] <= t_x0  # either touching or completely to the left
+        or bbox[3] <= t_y0  # either touching or completely above
+        or bbox[0] >= t_x1  # either touching or completely to the right
+        or bbox[1] >= t_y1  # either touching or completely below
+    )
+
+
+def check_notify_tag_area_for_encroachment(file_data: BytesIO) -> None | str:
+    """
+    This checks that no invisible/hidden are encroaching on the NOTIFY tag area
+    It returns the first detected encroachment, if any exists as an optimisation decision.
+    The primary aim of this check is to prevent precompiled letters with encroachments in the Notify tag area from being
+    sent to DVLA where they will be rejected.
+    """
+    file_data.seek(0)
+    doc = pymupdf.open("pdf", file_data)
+    page = doc[0]
+
+    # Extract bounding boxes in the top half of the PDF page.
+    # The coverage could be expanded if needed. The underlying mupdf engine(although extremely efficient as it is a C
+    # extension) discards partially overlapping bboxes which aren't completely in the provided target clip area.
+    # The strategy is to start conservatively and expand the scanned area if needed.
+    target_bounding_box = pymupdf.Rect(
+        0,  # x0
+        0,  # y0
+        A4_WIDTH * mm,  # x1
+        (A4_HEIGHT * mm) / 2,  # y1
+    )
+
+    data = page.get_text("dict", clip=target_bounding_box)
+    file_data.seek(0)
+
+    # To mitigate the performance hit of sorting in Python, hierarchical scalar bounding box checks are run across
+    # every structural level of the PDF, ie  to filter out unsuitable bounding boxes.
+    # PDF page layout is hierarchical with a tree structure,block -> line -> span, so every span will only be visited
+    # once and the only comparison is to the NOTIFY_TAG_BOUNDING_BOX (and the area to it's right along the width of the
+    # page), so even though the algorithm is a 3 level nested loop, the worst case scenario will be O(n).
+
+    for block in data.get("blocks", []):
+        if _no_intersect_with_notify_tag_bbox(block["bbox"]):
+            continue
+
+        for line in block.get("lines", []):
+            if _no_intersect_with_notify_tag_bbox(line["bbox"]):
+                continue
+
+            for span in line.get("spans", []):
+                if _no_intersect_with_notify_tag_bbox(span["bbox"]):
+                    continue
+
+                text = span["text"]
+
+                # Account for the fact that the text "NOTIFY" is in the notify_tag bounding box
+                if text == NOTIFY_TAG_TEXT:
+                    continue
+                # Any other text or trailing ghost spaces will trigger an encroachment
+                if text:
+                    return text
+
+    return None
 
 
 def add_notify_tag_to_letter(src_pdf):
@@ -879,8 +976,9 @@ def rewrite_address_block(pdf, *, page_count, allow_international_letters, filen
                 raise ValidationFailed("address-placement-mismatch", [1], page_count=page_count)
         raise ValidationFailed(address.error_code, [1], page_count=page_count)
 
-    # pdf = redact_precompiled_letter_address_block(pdf)
-    # pdf = add_address_to_precompiled_letter(pdf, address.normalised)
+    # [NOTIFYNL] The address block is only validated, not rewritten: unlike upstream, we don't
+    # redact it and redraw it from the normalised address (redact_precompiled_letter_address_block
+    # followed by add_address_to_precompiled_letter), so the sender's own layout is kept.
     return pdf, address.normalised
 
 
@@ -893,7 +991,7 @@ def _extract_text_from_first_page_of_pdf(pdf, rect):
     :return: Any text found
     """
     pdf.seek(0)
-    doc = fitz.open("pdf", pdf)
+    doc = pymupdf.open("pdf", pdf)
     page = doc[0]
     ret = _extract_text_from_page(page, rect)
     pdf.seek(0)
@@ -911,29 +1009,44 @@ def _extract_text_from_page(page, rect):
     and is structured as follows:
     (x1, y1, x2, y2, word value, paragraph number, line number, word position within the line)
 
-    :param fitz.Page page: fitz page object from which to extract
+    :param pymupdf.Page page: pymupdf page object from which to extract
     :param rect: rectangle describing the area to extract from
     :return: Any text found
     """
     words = page.get_text_words()
-    mywords = [w for w in words if fitz.Rect(w[:4]).intersects(rect)]
+    mywords = [w for w in words if pymupdf.Rect(w[:4]).intersects(rect)]
 
     def _get_address_from_get_textwords():
         return page.get_text(clip=rect).strip()
 
     mywords.sort(key=itemgetter(-3, -2, -1))
-    group = groupby(mywords, key=itemgetter(3))
+    group = groupby(mywords, key=itemgetter(5, 6))
     extracted_text = []
-    for _y2, gwords in group:
+    for _block_line, gwords in group:
         extracted_text.append(" ".join(w[4] for w in gwords))
     extracted_text = "\n".join(extracted_text)
+
+    def _get_address_grouped_by_y2():
+        # group by block, then line
+        group = groupby(mywords, key=itemgetter(3))
+        extracted_text = []
+        for _y2, gwords in group:
+            extracted_text.append(" ".join(w[4] for w in gwords))
+        extracted_text = "\n".join(extracted_text)
+        return extracted_text
 
     if rect != NOTIFY_TAG_BOUNDING_BOX and PrecompiledPostalAddress(
         _get_address_from_get_textwords()
     ) != PrecompiledPostalAddress(extracted_text):
-        # grouping by paragraph ended up different to grouping by y2. lets just log for now. we might want to swap over
-        # in the future but without knowing how much it changes we cant be sure
-        current_app.logger.info("Address extraction different between y2 and get_text")
+        # Log differences between our current address extraction methods and get_text.
+        # We might want to swap over in the future but without knowing how much it changes we cant be sure
+        current_app.logger.info("Address extraction different between grouping by line and get_text")
+
+    if rect != NOTIFY_TAG_BOUNDING_BOX and PrecompiledPostalAddress(
+        _get_address_grouped_by_y2()
+    ) != PrecompiledPostalAddress(extracted_text):
+        # log the difference between grouping by y co-ordinate and by line, both using the get_text_words function
+        current_app.logger.info("Address extraction different when splitting address by y2 vs by line")
 
     # normalizing to NFKD replaces characters with compatibility mode equivalents - including replacing
     # ligatures like ﬀ with ff
@@ -966,7 +1079,7 @@ def _get_pages_with_notify_tag(src_pdf_bytes, is_an_attachment=False):
     sent via notify
     """
     src_pdf_bytes.seek(0)
-    doc = fitz.open("pdf", src_pdf_bytes)
+    doc = pymupdf.open("pdf", src_pdf_bytes)
     starting_page_index = 1
     if is_an_attachment:
         starting_page_index = 0
@@ -987,7 +1100,7 @@ def _get_pages_with_notify_tag(src_pdf_bytes, is_an_attachment=False):
 
 def redact_precompiled_letter_address_block(pdf, letter_address_placement=DEFAULT_LETTER_ADDRESS_PLACEMENT):
     pdf.seek(0)  # make sure we're at the beginning
-    doc = fitz.open("pdf", pdf)
+    doc = pymupdf.open("pdf", pdf)
     first_page = doc[0]
 
     first_page.add_redact_annot(address_bounding_box(letter_address_placement))

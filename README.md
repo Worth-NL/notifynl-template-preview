@@ -6,7 +6,11 @@ Generates PNG and PDF previews of letter templates created in the [GOV.UK Notify
 
 ### Docker container
 
-This app uses dependencies that are difficult to install locally. In order to make local development easy, we run app commands through a Docker container. Run the following to set this up:
+This app uses dependencies that are difficult to install locally. In order to make local development easy, we run app commands through a Docker container. 
+
+Make sure you have the [https://github.com/alphagov/notifications-private-assets](notifications-private-assets) repository checked out at the same level as this one.
+
+Run the following to set the container up:
 
 ```shell
   make bootstrap-with-docker
@@ -79,4 +83,11 @@ Celery is used for sanitising PDF letters asynchronously. It requires the `NOTIF
 - [Making local requests](docs/local-requests.md)
 - [Guidance for deploying changes](docs/deploying.md)
 - [The invisible "NOTIFY" tag](docs/notify-tag.md)
+- [Summary of dependencies used by the app](docs/dependencies.md)
 - [Updating dependencies](https://github.com/alphagov/notifications-manuals/wiki/Dependencies)
+
+## Licence
+
+Unless stated otherwise, the codebase is released under [the MIT License][mit]. This covers both the codebase and any sample code in the documentation.
+
+[mit]: LICENCE
