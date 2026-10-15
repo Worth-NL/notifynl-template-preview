@@ -17,7 +17,6 @@ from reportlab.pdfgen import canvas
 
 from app.precompiled import (
     A4_WIDTH,
-    DEFAULT_LETTER_ADDRESS_PLACEMENT,
     NOTIFY_TAG_BOUNDING_BOX,
     NotifyCanvas,
     _no_intersect_with_notify_tag_bbox,
@@ -256,19 +255,13 @@ def test_get_invalid_pages_second_page(x, y, expected_failed, client):
         # under the citizen address block:
         (24.6 * mm, (297 - 90) * mm, 1, ("content-outside-printable-area", [1])),
         (24.6 * mm, (297 - 90) * mm, 2, ("", [])),  # Same place on page 2 should be ok
-        pytest.param(
+        (
             24.6 * mm,
             (297 - 39) * mm,
             1,
             ("content-outside-printable-area", [1]),
-            marks=pytest.mark.skip(reason="[NOTIFYNL] NL margins allow content here, so no error is returned"),
         ),  # under the logo
         (24.6 * mm, (297 - 39) * mm, 2, ("", [])),  # Same place on page 2 should be ok
-        # [NOTIFYNL] regression test for the gap between LOGO_BOTTOM_FROM_TOP_OF_PAGE and
-        # ADDRESS_TOP_FROM_TOP_OF_PAGE left uncovered between the 2025-10-02 margin change
-        # and now - LOGO_BOTTOM_FROM_TOP_OF_PAGE now equals ADDRESS_TOP_FROM_TOP_OF_PAGE, so
-        # this point (45mm from top, between the old logo/address boundaries) is covered.
-        (24.6 * mm, (297 - 45) * mm, 1, ("", [])),
         (0, 0, 2, ("content-outside-printable-area", [2])),
         (200, 200, 2, ("", [])),
         (590, 830, 2, ("content-outside-printable-area", [2])),
@@ -296,30 +289,6 @@ def test_get_invalid_pages_black_text(client, x, y, page, expected_message):
     cv.save()
     packet.seek(0)
     assert get_invalid_pages_with_message(packet) == expected_message
-
-
-def test_get_invalid_pages_closes_gap_between_address_bottom_and_body_top_for_50mm_placement(client):
-    """[NOTIFYNL] Regression test for the gap between address_bottom_from_top_of_page("50mm")
-    (90mm) and the old bare BODY_TOP_FROM_TOP_OF_PAGE (95mm) - previously uncovered by
-    _overlay_printable_areas_of_address_block_page_with_white, letting a "Datum"/"Onderwerp"
-    block just below a 50mm-placed address window get wrongly flagged
-    content-outside-printable-area (Den Haag SZW letter, 2026-08-31).
-    """
-    packet = io.BytesIO()
-    cv = canvas.Canvas(packet, pagesize=A4)
-    cv.setStrokeColor(white)
-    cv.setFillColor(white)
-    cv.rect(0, 0, 1000, 1000, stroke=1, fill=1)
-
-    cv.setStrokeColor(black)
-    cv.setFillColor(black)
-    # x=60mm is inside the address column; y=92mm sits in the old gap between
-    # address_bottom_from_top_of_page("50mm")=90mm and the old bare BODY_TOP=95mm.
-    cv.drawString(60 * mm, (297 - 92) * mm, "This is a test string used to detect non white on a page")
-
-    cv.save()
-    packet.seek(0)
-    assert get_invalid_pages_with_message(packet, letter_address_placement="50mm") == ("", [])
 
 
 def test_get_invalid_pages_address_margin(client):
@@ -362,7 +331,6 @@ def test_get_invalid_pages_is_ok_with_landscape_pages_that_are_rotated(client):
     assert invalid_pages == []
 
 
-@pytest.mark.skip(reason="[NOTIFYNL] Broken by validation change")
 def test_get_invalid_pages_ignores_notify_tags_on_page_1(client):
     message, invalid_pages = get_invalid_pages_with_message(BytesIO(already_has_notify_tag))
     assert message == ""
@@ -377,7 +345,6 @@ def test_get_invalid_pages_content_up_to_boundary_edges(client):
     assert invalid_pages == []
 
 
-@pytest.mark.skip(reason="[NOTIFYNL] Broken by validation change")
 def test_get_invalid_pages_rejects_later_pages_with_notify_tags(client):
     message, invalid_pages = get_invalid_pages_with_message(BytesIO(notify_tags_on_page_2_and_4))
     assert message == "notify-tag-found-in-content"
@@ -417,9 +384,7 @@ def test_overlay_template_png_for_page_checks_if_first_page(client, auth_header,
     )
 
     assert response.status_code == 200
-    mock_colour.assert_called_once_with(
-        ANY, is_first_page=expected_first_page, letter_address_placement=DEFAULT_LETTER_ADDRESS_PLACEMENT
-    )
+    mock_colour.assert_called_once_with(ANY, is_first_page=expected_first_page)
     mock_png_from_pdf.assert_called_once_with(mock_colour.return_value, page_number=1)
 
 
@@ -466,14 +431,9 @@ def test_overlay_template_pdf_colours_pages_in_red(client, auth_header, mocker):
     )
     assert resp.status_code == 200
 
-    assert (
-        mock_colour.call_args_list
-        == [call(ANY, is_first_page=True, letter_address_placement=DEFAULT_LETTER_ADDRESS_PLACEMENT)]
-        + [call(ANY, is_first_page=False, letter_address_placement=DEFAULT_LETTER_ADDRESS_PLACEMENT)] * 9
-    )
+    assert mock_colour.call_args_list == [call(ANY, is_first_page=True)] + [call(ANY, is_first_page=False)] * 9
 
 
-@pytest.mark.skip(reason="[NOTIFYNL] Broken by validation change")
 def test_precompiled_sanitise_pdf_without_notify_tag(client, auth_header):
     assert not is_notify_tag_present(BytesIO(blank_with_address))
 
@@ -516,7 +476,6 @@ def test_precompiled_sanitise_pdf_for_an_attachment(client, auth_header, mocker)
     assert not is_notify_tag_present(pdf)
 
 
-@pytest.mark.skip(reason="[NOTIFYNL] Broken by validation change")
 def test_precompiled_sanitise_pdf_with_notify_tag(client, auth_header):
     assert is_notify_tag_present(BytesIO(notify_tag_on_first_page))
 
@@ -563,9 +522,8 @@ def test_precompiled_sanitise_pdf_with_colour_outside_boundaries_returns_400(cli
 
 
 def test_precompiled_sanitise_pdf_with_colour_in_address_margin_returns_400(client, auth_header, mocker):
-    # fixture's address block is laid out at the 50mm position
     response = client.post(
-        url_for("precompiled_blueprint.sanitise_precompiled_letter", letter_address_placement="50mm"),
+        url_for("precompiled_blueprint.sanitise_precompiled_letter"),
         data=address_margin,
         headers={"Content-type": "application/json", **auth_header},
     )
@@ -652,7 +610,6 @@ def test_precompiled_sanitise_pdf_that_with_an_unknown_error_raised_returns_400(
     }
 
 
-@pytest.mark.skip(reason="[NOTIFYNL] Broken by validation change")
 def test_sanitise_precompiled_letter_with_missing_address_returns_400(client, auth_header):
     response = client.post(
         url_for("precompiled_blueprint.sanitise_precompiled_letter"),
@@ -688,7 +645,6 @@ def test_sanitise_precompiled_letter_with_missing_or_wrong_address_ok_for_an_att
     }
 
 
-@pytest.mark.skip(reason="[NOTIFYNL] Broken by validation change")
 @pytest.mark.parametrize(
     "file, allow_international, expected_error_message",
     (
@@ -765,7 +721,6 @@ def test_is_notify_tag_calls_extract_with_wider_numbers(mocker):
     mock_extract.assert_called_once_with(pdf, pymupdf.Rect(0.0, 0.0, 15.191 * mm, 6.149 * mm))
 
 
-@pytest.mark.skip(reason="[NOTIFYNL] Broken by validation change")
 @pytest.mark.parametrize(
     ["pdf_data", "address_snippet"],
     [(example_dwp_pdf, "testington"), (valid_letter, "buckingham palace")],
@@ -783,8 +738,7 @@ def test_rewrite_address_block_end_to_end(pdf_data, address_snippet, client):
 
 
 def test_extract_address_block(client):
-    # fixture's address block is laid out at the 50mm position
-    assert extract_address_block(BytesIO(example_dwp_pdf), letter_address_placement="50mm").raw_address == "\n".join(
+    assert extract_address_block(BytesIO(example_dwp_pdf)).raw_address == "\n".join(
         [
             "MR J DOE",
             "13 TEST LANE",
@@ -794,7 +748,6 @@ def test_extract_address_block(client):
     )
 
 
-@pytest.mark.skip(reason="[NOTIFYNL] Broken by validation change")
 def test_extract_address_block_handles_address_with_ligatures_in_different_fonts(client, caplog):
     # "quick maffs defied" should be on the same line. If address lines are grouped by line, this works correctly.
     # If address lines are grouped by y2, the address is not split up correctly.
@@ -807,7 +760,6 @@ def test_extract_address_block_handles_address_with_ligatures_in_different_fonts
     )
 
 
-@pytest.mark.skip(reason="[NOTIFYNL] UK-positioned fixture falls outside the NL address window; see _nl twins")
 def test_extract_address_block_handles_address_with_different_coordinates(client, caplog):
     # If address lines are grouped by y2 this gets split into too many lines.
     # When grouped by line, it is split correctly into 4 lines.
@@ -822,7 +774,6 @@ def test_extract_address_block_handles_address_with_different_coordinates(client
     assert "Address extraction different when splitting address by y2 vs by line" in caplog.messages
 
 
-@pytest.mark.skip(reason="[NOTIFYNL] UK-positioned fixture falls outside the NL address window; see _nl twins")
 def test_extract_address_block_handles_address_with_a_large_amount_of_whitespace_in_the_line():
     # The PDF has a large space between the words "My" and "Recipient," on the first line.
     # These should still be considered the same line by PyMuPDF, but this is to check if there are line
@@ -838,7 +789,6 @@ def test_extract_address_block_handles_address_with_a_large_amount_of_whitespace
     )
 
 
-@pytest.mark.skip(reason="[NOTIFYNL] UK-positioned fixture falls outside the NL address window; see _nl twins")
 def test_extract_address_block_when_address_paragraphs_do_not_match_visual_order(client):
     # This test documents a current rare edge case where address extraction doesn't behave as we want due.
     # Visually, the address is ordered "normally" with the postcode on the last line and user name on line 1.
@@ -863,7 +813,6 @@ def test_add_address_to_precompiled_letter_puts_address_on_page():
     assert extract_address_block(ret).raw_address == address
 
 
-@pytest.mark.skip(reason="[NOTIFYNL] Broken by validation change")
 @pytest.mark.parametrize(
     "pdf,expected_address",
     [
@@ -902,8 +851,7 @@ def test_redact_address_block_preserves_addresses_elsewhere_on_page():
 
 
 def test_redact_precompiled_letter_address_block_only_touches_first_page():
-    # fixture's address block is laid out at the 50mm position
-    address = extract_address_block(BytesIO(address_block_repeated_on_second_page), letter_address_placement="50mm")
+    address = extract_address_block(BytesIO(address_block_repeated_on_second_page))
     assert address.raw_address != ""  # check something is there before we redact
 
     doc = pymupdf.open("pdf", address_block_repeated_on_second_page)
@@ -911,9 +859,8 @@ def test_redact_precompiled_letter_address_block_only_touches_first_page():
 
     new_pdf = redact_precompiled_letter_address_block(
         BytesIO(address_block_repeated_on_second_page),
-        letter_address_placement="50mm",
     )
-    assert extract_address_block(new_pdf, letter_address_placement="50mm").raw_address == ""
+    assert extract_address_block(new_pdf).raw_address == ""
 
     doc = pymupdf.open("pdf", new_pdf)
     new_second_page_text = doc[1].get_text()
@@ -933,18 +880,15 @@ def test_sanitise_file_contents_on_pdf_with_no_resources_on_one_of_the_pages_con
     be valid and return a successful response, but some test that this returns a correct response is at least better
     than this call raising an error/500."""
     response = client.post(
-        "/precompiled/sanitise?letter_address_placement=50mm",
+        "/precompiled/sanitise",
         data=no_resources_on_last_page,
         headers={"Content-type": "application/json", **auth_header},
     )
 
-    # [NOTIFYNL] message changed from "content-outside-printable-area" to "not-enough-address-lines"
-    # after closing the LOGO_BOTTOM/ADDRESS_TOP overlay gap - this PDF is still correctly rejected,
-    # just by a later validation step now that the gap-triggered false rejection no longer fires first.
     assert response.json == {
         "recipient_address": None,
         "page_count": 3,
-        "message": "not-enough-address-lines",
+        "message": "content-outside-printable-area",
         "invalid_pages": [1],
         "file": None,
     }
@@ -1208,7 +1152,6 @@ def test_check_notify_tag_area_for_encroachment_returns_no_encroachment_for_vali
     assert check_notify_tag_area_for_encroachment(valid_pdf_file_data) is None
 
 
-@pytest.mark.skip(reason="[NOTIFYNL] UK fixture address fails NL validation before the check runs; see _nl twin")
 @pytest.mark.parametrize(
     "encroaching_character, expected_logged_result",
     [

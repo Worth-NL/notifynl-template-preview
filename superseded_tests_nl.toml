@@ -1,0 +1,161 @@
+[[test]]
+nodeid = "tests/celery/test_tasks.py::test_sanitise_and_upload_valid_letter"
+reason = "UK fixture address fails NL address validation"
+
+[[test]]
+nodeid = "tests/celery/test_tasks.py::test_sanitise_international_letters"
+reason = "UK fixture address fails NL address validation"
+
+[[test]]
+nodeid = "tests/celery/test_tasks.py::test_create_pdf_for_templated_letter_happy_path"
+reason = "LetterPrintTemplate also gets the service's letter_address_placement"
+
+[[test]]
+nodeid = "tests/celery/test_tasks.py::test_create_pdf_for_templated_letter_adds_letter_attachment_if_provided"
+reason = "NL adds fixed and ad-hoc attachments with add_attachments_to_letter"
+twin = ["tests/celery/test_tasks_nl.py::test_create_pdf_for_templated_letter_adds_letter_attachment_if_provided"]
+
+[[test]]
+nodeid = "tests/celery/test_tasks.py::test_recreate_pdf_for_precompiled_letter"
+reason = "UK fixture address fails NL address validation"
+
+[[test]]
+nodeid = "tests/test_exception_hooks.py::TestPDFLibraryErrors::test_weasyprint_svg_warning_is_routed_to_kibana"
+reason = "Passes, but leaves a mock handler on the root logger, which segfaults a single-process test run at exit (exit code 139)"
+twin = ["tests/test_exception_hooks_nl.py::TestPDFLibraryErrors::test_weasyprint_svg_warning_is_routed_to_kibana"]
+
+[[test]]
+nodeid = "tests/test_gunicorn_config.py::test_gunicorn_config"
+reason = "NL raises max_requests so k8s probes don't drive worker restarts"
+counterpart = ["tests/test_gunicorn_config_nl.py::test_gunicorn_config"]
+
+[[test]]
+nodeid = "tests/test_precompiled.py::test_get_invalid_pages_black_text[69.73228346456695-731.3385826771654-1-expected_message10]"
+reason = "NL margins allow content under the logo"
+counterpart = ["tests/test_precompiled_nl.py::test_get_invalid_pages_allows_text_in_the_logo_area_down_to_the_address_block"]
+
+[[test]]
+nodeid = "tests/test_precompiled.py::test_overlay_template_png_for_page_checks_if_first_page"
+reason = "The overlay also gets the service's letter_address_placement"
+twin = ["tests/test_precompiled_nl.py::test_overlay_template_png_for_page_checks_if_first_page"]
+
+[[test]]
+nodeid = "tests/test_precompiled.py::test_overlay_template_pdf_colours_pages_in_red"
+reason = "The overlay also gets the service's letter_address_placement"
+twin = ["tests/test_precompiled_nl.py::test_overlay_template_pdf_colours_pages_in_red"]
+
+[[test]]
+nodeid = "tests/test_precompiled.py::test_precompiled_sanitise_pdf_without_notify_tag"
+reason = "UK fixture address fails NL address validation"
+
+[[test]]
+nodeid = "tests/test_precompiled.py::test_precompiled_sanitise_pdf_with_notify_tag"
+reason = "UK fixture address fails NL address validation"
+
+[[test]]
+nodeid = "tests/test_precompiled.py::test_precompiled_sanitise_pdf_with_colour_in_address_margin_returns_400"
+reason = "Fixture address is laid out at the 50mm position, but validated against the 60mm default"
+twin = ["tests/test_precompiled_nl.py::test_precompiled_sanitise_pdf_with_colour_in_address_margin_returns_400"]
+
+[[test]]
+nodeid = "tests/test_precompiled.py::test_sanitise_precompiled_letter_with_bad_address_returns_400"
+reason = "UK fixture addresses fail NL address validation"
+twin = ["tests/test_precompiled_nl.py::test_sanitise_precompiled_letter_with_bad_address_returns_400"]
+
+[[test]]
+nodeid = "tests/test_precompiled.py::test_rewrite_address_block_end_to_end"
+reason = "NL validates the address block but doesn't rewrite it, and the UK fixture addresses fail NL validation"
+
+[[test]]
+nodeid = "tests/test_precompiled.py::test_extract_address_block"
+reason = "Fixture address is laid out at the 50mm position, but extracted with the 60mm default"
+twin = ["tests/test_precompiled_nl.py::test_extract_address_block"]
+
+[[test]]
+nodeid = "tests/test_precompiled.py::test_extract_address_block_handles_address_with_ligatures_in_different_fonts"
+reason = "UK-positioned fixture falls outside the NL address window"
+
+[[test]]
+nodeid = "tests/test_precompiled.py::test_extract_address_block_handles_address_with_different_coordinates"
+reason = "UK-positioned fixture falls outside the NL address window"
+
+[[test]]
+nodeid = "tests/test_precompiled.py::test_extract_address_block_handles_address_with_a_large_amount_of_whitespace_in_the_line"
+reason = "UK-positioned fixture falls outside the NL address window"
+
+[[test]]
+nodeid = "tests/test_precompiled.py::test_extract_address_block_when_address_paragraphs_do_not_match_visual_order"
+reason = "UK-positioned fixture falls outside the NL address window"
+
+[[test]]
+nodeid = "tests/test_precompiled.py::test_redact_precompiled_letter_address_block_redacts_address_block"
+reason = "UK-positioned fixtures fall outside the NL address window"
+not_applicable = "NL doesn't redact or rewrite the address block of precompiled letters"
+
+[[test]]
+nodeid = "tests/test_precompiled.py::test_redact_precompiled_letter_address_block_only_touches_first_page"
+reason = "Fixture address is laid out at the 50mm position, but redacted with the 60mm default"
+not_applicable = "NL doesn't redact or rewrite the address block of precompiled letters"
+
+[[test]]
+nodeid = "tests/test_precompiled.py::test_sanitise_file_contents_on_pdf_with_no_resources_on_one_of_the_pages_content_outside_bounds"
+reason = "NL rejects this PDF with not-enough-address-lines, after closing the logo/address overlay gap"
+twin = ["tests/test_precompiled_nl.py::test_sanitise_file_contents_on_pdf_with_no_resources_on_one_of_the_pages_content_outside_bounds"]
+
+[[test]]
+nodeid = "tests/test_precompiled.py::test_sanitise_precompiled_letter_with_invisible_characters_encroaching_on_notify_tag_area_logging"
+reason = "UK fixture address fails NL address validation before the check runs"
+twin = ["tests/test_precompiled_nl.py::test_sanitise_precompiled_letter_with_invisible_characters_encroaching_on_notify_tag_area_logging"]
+
+[[test]]
+nodeid = "tests/test_preview/test_preview_precompiled.py::test_precompiled_pdf_caches_png_to_s3"
+reason = "NL serialises the page without pickle, so the cache keys differ"
+
+[[test]]
+nodeid = "tests/test_preview/test_preview_precompiled.py::test_precompiled_pdf_returns_png_from_cache"
+reason = "NL serialises the page without pickle, so the cache keys differ"
+twin = ["tests/test_preview/test_preview_precompiled_nl.py::test_precompiled_pdf_returns_png_from_cache"]
+
+[[test]]
+nodeid = "tests/test_preview/test_preview_precompiled.py::test_precompiled_pdf_caches_entire_contents_of_page"
+reason = "NL serialises the page without pickle"
+twin = ["tests/test_preview/test_preview_precompiled_nl.py::test_precompiled_pdf_caches_entire_contents_of_page"]
+
+[[test]]
+nodeid = "tests/test_preview/test_preview_templated.py::test_get_pdf_caches_with_correct_keys"
+reason = "The NL letter template changes the cache keys"
+
+[[test]]
+nodeid = "tests/test_preview/test_preview_templated.py::test_get_png_caches_with_correct_keys"
+reason = "The NL letter template changes the cache keys"
+
+[[test]]
+nodeid = "tests/test_preview/test_preview_templated.py::test_view_letter_template_png_with_attachment_hits_cache_correct_number_of_times"
+reason = "NL adds fixed and ad-hoc attachments with add_attachments_to_letter"
+twin = ["tests/test_preview/test_preview_templated_nl.py::test_view_letter_template_png_with_attachment_hits_cache_correct_number_of_times"]
+
+[[test]]
+nodeid = "tests/test_preview/test_preview_templated.py::test_view_letter_template_png_route_gets_png_for_page[50-2-200]"
+reason = "The NL letter layout fits 50 sentences on one page"
+
+[[test]]
+nodeid = "tests/test_preview/test_preview_templated.py::test_view_letter_template_png_when_requested_page_out_of_range"
+reason = "NL adds fixed and ad-hoc attachments with add_attachments_to_letter"
+twin = ["tests/test_preview/test_preview_templated_nl.py::test_view_letter_template_png_when_requested_page_out_of_range"]
+
+[[test]]
+nodeid = "tests/test_preview/test_preview_templated.py::test_letter_template_constructed_properly_for_pdf"
+reason = "LetterPreviewTemplate also gets the service's letter_address_placement"
+
+[[test]]
+nodeid = "tests/test_preview/test_preview_templated.py::test_view_letter_template_pdf_adds_attachment"
+reason = "NL adds fixed and ad-hoc attachments with add_attachments_to_letter"
+twin = ["tests/test_preview/test_preview_templated_nl.py::test_view_letter_template_pdf_adds_attachment"]
+
+[[test]]
+nodeid = "tests/test_preview/test_preview_templated.py::test_POST_page_count[50-None-None-None-2]"
+reason = "The NL letter layout fits 50 sentences on one page"
+
+[[test]]
+nodeid = "tests/test_preview/test_preview_templated.py::test_page_count_from_cache"
+reason = "The NL letter template changes the cache keys"

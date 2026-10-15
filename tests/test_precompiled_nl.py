@@ -1,11 +1,13 @@
+import io
 import unicodedata
 import uuid
 from io import BytesIO
-from unittest.mock import MagicMock
+from unittest.mock import ANY, MagicMock, call
 
 import pymupdf
 import pytest
 from flask import url_for
+from reportlab.lib.colors import black, white
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.pdfgen import canvas
@@ -13,20 +15,28 @@ from reportlab.pdfgen import canvas
 from app import ValidationFailed
 from app.precompiled import (
     ADDRESS_LEFT_FROM_LEFT_OF_PAGE,
+    DEFAULT_LETTER_ADDRESS_PLACEMENT,
     NOTIFY_TAG_BOUNDING_BOX,
     _other_letter_address_placement,
     check_notify_tag_area_for_encroachment,
     extract_address_block,
+    get_invalid_pages_with_message,
     rewrite_address_block,
 )
 from tests.pdf_consts import (
+    address_margin,
+    bad_postcode,
+    example_dwp_pdf,
+    multi_page_pdf,
+    no_resources_on_last_page,
+)
+from tests.pdf_consts_nl import (
     address_50mm_no_retouradres,
     address_50mm_with_retouradres,
     address_60mm_no_retouradres,
     address_60mm_with_retouradres,
     address_with_retouradres_missing_city,
     address_with_retouradres_missing_postcode,
-    bad_postcode,
 )
 
 
@@ -126,10 +136,8 @@ def test_rewrite_address_block_keeps_original_error_code_when_retry_also_fails(m
 
 
 def test_sanitise_precompiled_letter_with_bad_address_returns_400(client, auth_header):
-    # NL version of tests/test_precompiled.py::test_sanitise_precompiled_letter_with_bad_address_returns_400,
-    # which is skipped upstream (reason="[NOTIFYNL] Broken by validation change") - its fixtures never passed
-    # an explicit letter_address_placement, so they now default to "60mm" against fixtures laid out at
-    # "50mm". Explicitly passing "50mm" here (matching the fixtures' actual layout) restores real coverage.
+    # Upstream's version doesn't pass a letter_address_placement, so its fixtures (laid out at the 50mm position)
+    # are validated against the "60mm" default window. Passing "50mm" here matches the fixtures' actual layout.
     response = client.post(
         url_for("precompiled_blueprint.sanitise_precompiled_letter", letter_address_placement="50mm"),
         data=bad_postcode,
@@ -154,16 +162,6 @@ def test_sanitise_precompiled_letter_returns_address_placement_mismatch_end_to_e
 
     assert response.status_code == 400
     assert response.json["message"] == "address-placement-mismatch"
-
-
-# Note: tests/test_precompiled.py also has a second test skipped for the same stated reason,
-# test_rewrite_address_block_end_to_end (line ~736, reason="[NOTIFYNL] Broken by validation
-# change"). Investigated during this session: passing letter_address_placement="50mm" explicitly
-# does NOT fix it - both its fixtures (example_dwp_pdf, valid_letter) still fail with
-# "not-a-real-uk-postcode" even at the placement matching their actual layout, e.g.
-# example_dwp_pdf extracts a plausibly-formatted postcode ("TS7 1NG") that the real-UK-postcode
-# validator nonetheless rejects. That's a genuine, pre-existing, placement-unrelated bug, out of
-# scope for this fix - left skipped upstream rather than "fixed" here with a misleading test.
 
 
 @pytest.mark.parametrize(
@@ -340,3 +338,156 @@ def test_extract_address_block_line_drawn_as_separate_pieces_is_split_and_logged
 
     assert address.error_code == "too-many-address-lines"
     assert "Address extraction different when splitting address by y2 vs by line" in caplog.messages
+
+
+@pytest.mark.parametrize(
+    "y_from_top",
+    [
+        39,  # flagged as "under the logo" upstream, but NL's logo area reaches down to the address block
+        # regression test for the gap between LOGO_BOTTOM_FROM_TOP_OF_PAGE and ADDRESS_TOP_FROM_TOP_OF_PAGE left
+        # uncovered after the 2025-10-02 margin change - LOGO_BOTTOM_FROM_TOP_OF_PAGE now equals
+        # ADDRESS_TOP_FROM_TOP_OF_PAGE, so this point between the old logo/address boundaries is covered
+        45,
+    ],
+)
+def test_get_invalid_pages_allows_text_in_the_logo_area_down_to_the_address_block(client, y_from_top):
+    packet = io.BytesIO()
+    cv = canvas.Canvas(packet, pagesize=A4)
+    cv.setStrokeColor(white)
+    cv.setFillColor(white)
+    cv.rect(0, 0, 1000, 1000, stroke=1, fill=1)
+
+    cv.setStrokeColor(black)
+    cv.setFillColor(black)
+    cv.drawString(24.6 * mm, (297 - y_from_top) * mm, "This is a test string used to detect non white on a page")
+
+    cv.save()
+    packet.seek(0)
+    assert get_invalid_pages_with_message(packet) == ("", [])
+
+
+def test_get_invalid_pages_closes_gap_between_address_bottom_and_body_top_for_50mm_placement(client):
+    """Regression test for the gap between address_bottom_from_top_of_page("50mm")
+    (90mm) and the old bare BODY_TOP_FROM_TOP_OF_PAGE (95mm) - previously uncovered by
+    _overlay_printable_areas_of_address_block_page_with_white, letting a "Datum"/"Onderwerp"
+    block just below a 50mm-placed address window get wrongly flagged
+    content-outside-printable-area (Den Haag SZW letter, 2026-08-31).
+    """
+    packet = io.BytesIO()
+    cv = canvas.Canvas(packet, pagesize=A4)
+    cv.setStrokeColor(white)
+    cv.setFillColor(white)
+    cv.rect(0, 0, 1000, 1000, stroke=1, fill=1)
+
+    cv.setStrokeColor(black)
+    cv.setFillColor(black)
+    # x=60mm is inside the address column; y=92mm sits in the old gap between
+    # address_bottom_from_top_of_page("50mm")=90mm and the old bare BODY_TOP=95mm.
+    cv.drawString(60 * mm, (297 - 92) * mm, "This is a test string used to detect non white on a page")
+
+    cv.save()
+    packet.seek(0)
+    assert get_invalid_pages_with_message(packet, letter_address_placement="50mm") == ("", [])
+
+
+@pytest.mark.parametrize(
+    ["params", "expected_first_page"],
+    [
+        ({"page_number": "1"}, True),
+        ({"page_number": "2"}, False),
+        ({"is_first_page": "true"}, True),
+        ({"is_first_page": "anything_else"}, False),
+        ({"is_first_page": ""}, False),
+        ({"page_number": 1, "is_first_page": "true"}, True),  # is_first_page takes priority
+        ({"page_number": "1", "is_an_attachment": True}, False),  # attachment doesn't mandate address block
+    ],
+)
+def test_overlay_template_png_for_page_checks_if_first_page(client, auth_header, mocker, params, expected_first_page):
+    mock_png_from_pdf = mocker.patch("app.precompiled.png_from_pdf", return_value=BytesIO(b"\x00"))
+    mock_colour = mocker.patch("app.precompiled._colour_no_print_areas_of_single_page_pdf_in_red")
+
+    response = client.post(
+        url_for("precompiled_blueprint.overlay_template_png_for_page", **params),
+        data=b"1234",
+        headers={"Content-type": "application/json", **auth_header},
+    )
+
+    assert response.status_code == 200
+    mock_colour.assert_called_once_with(
+        ANY, is_first_page=expected_first_page, letter_address_placement=DEFAULT_LETTER_ADDRESS_PLACEMENT
+    )
+    mock_png_from_pdf.assert_called_once_with(mock_colour.return_value, page_number=1)
+
+
+def test_overlay_template_pdf_colours_pages_in_red(client, auth_header, mocker):
+    mock_colour = mocker.patch("app.precompiled._colour_no_print_areas_of_page_in_red")
+    resp = client.post(
+        url_for("precompiled_blueprint.overlay_template_pdf"),
+        data=multi_page_pdf,
+        headers=auth_header,
+    )
+    assert resp.status_code == 200
+
+    assert (
+        mock_colour.call_args_list
+        == [call(ANY, is_first_page=True, letter_address_placement=DEFAULT_LETTER_ADDRESS_PLACEMENT)]
+        + [call(ANY, is_first_page=False, letter_address_placement=DEFAULT_LETTER_ADDRESS_PLACEMENT)] * 9
+    )
+
+
+def test_precompiled_sanitise_pdf_with_colour_in_address_margin_returns_400(client, auth_header, mocker):
+    # fixture's address block is laid out at the 50mm position
+    response = client.post(
+        url_for("precompiled_blueprint.sanitise_precompiled_letter", letter_address_placement="50mm"),
+        data=address_margin,
+        headers={"Content-type": "application/json", **auth_header},
+    )
+
+    assert response.status_code == 400
+    assert response.json == {
+        "page_count": 1,
+        "recipient_address": None,
+        "message": "content-outside-printable-area",
+        "invalid_pages": [1],
+        "file": None,
+    }
+
+
+def test_extract_address_block(client):
+    # fixture's address block is laid out at the 50mm position
+    assert extract_address_block(BytesIO(example_dwp_pdf), letter_address_placement="50mm").raw_address == "\n".join(
+        [
+            "MR J DOE",
+            "13 TEST LANE",
+            "TESTINGTON",
+            "TS7 1NG",
+        ]
+    )
+
+
+def test_sanitise_file_contents_on_pdf_with_no_resources_on_one_of_the_pages_content_outside_bounds(
+    client, auth_header
+):
+    """
+    This tests to make sure that pypdf doesn't raise a KeyError when sanitising a PDF that is missing /Resources
+    on one of the pages. Resources should be inferrer from one of the parent/previous pages in this case.
+
+    The PDF under test was provided by one of our services when they encountered the error. Ideally the PDF would
+    be valid and return a successful response, but some test that this returns a correct response is at least better
+    than this call raising an error/500."""
+    response = client.post(
+        "/precompiled/sanitise?letter_address_placement=50mm",
+        data=no_resources_on_last_page,
+        headers={"Content-type": "application/json", **auth_header},
+    )
+
+    # message changed from "content-outside-printable-area" to "not-enough-address-lines"
+    # after closing the LOGO_BOTTOM/ADDRESS_TOP overlay gap - this PDF is still correctly rejected,
+    # just by a later validation step now that the gap-triggered false rejection no longer fires first.
+    assert response.json == {
+        "recipient_address": None,
+        "page_count": 3,
+        "message": "not-enough-address-lines",
+        "invalid_pages": [1],
+        "file": None,
+    }
