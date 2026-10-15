@@ -1,3 +1,4 @@
+import base64
 import io
 import unicodedata
 import uuid
@@ -21,6 +22,7 @@ from app.precompiled import (
     check_notify_tag_area_for_encroachment,
     extract_address_block,
     get_invalid_pages_with_message,
+    is_notify_tag_present,
     rewrite_address_block,
 )
 from tests.pdf_consts import (
@@ -491,3 +493,40 @@ def test_sanitise_file_contents_on_pdf_with_no_resources_on_one_of_the_pages_con
         "invalid_pages": [1],
         "file": None,
     }
+
+
+def test_precompiled_sanitise_pdf_without_notify_tag(client, auth_header):
+    assert not is_notify_tag_present(BytesIO(address_60mm_no_retouradres))
+
+    response = client.post(
+        url_for("precompiled_blueprint.sanitise_precompiled_letter"),
+        data=address_60mm_no_retouradres,
+        headers={"Content-type": "application/json", **auth_header},
+    )
+    assert response.status_code == 200
+    assert response.json == {
+        "message": None,
+        "file": ANY,
+        "page_count": 1,
+        "recipient_address": "Persoonlijk\nCoolsingel 40\n3011 AD  ROTTERDAM",
+        "invalid_pages": None,
+    }
+
+    pdf = BytesIO(base64.b64decode(response.json["file"].encode()))
+    assert is_notify_tag_present(pdf)
+    assert extract_address_block(pdf).normalised == "Persoonlijk\nCoolsingel 40\n3011 AD  ROTTERDAM"
+
+
+@pytest.mark.parametrize("pdf, letter_address_placement", NL_LETTERS_WITH_PLACEMENT)
+def test_rewrite_address_block_keeps_the_pdf_and_returns_the_normalised_address(client, pdf, letter_address_placement):
+    # unlike upstream, NL only validates the address block: the sender's own layout is kept, not redacted and redrawn
+    new_pdf, address = rewrite_address_block(
+        BytesIO(pdf),
+        page_count=1,
+        allow_international_letters=False,
+        filename="file",
+        letter_address_placement=letter_address_placement,
+    )
+
+    assert new_pdf.getvalue() == pdf
+    assert address == "Persoonlijk\nCoolsingel 40\n3011 AD  ROTTERDAM"

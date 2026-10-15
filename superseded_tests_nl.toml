@@ -1,6 +1,7 @@
 [[test]]
 nodeid = "tests/celery/test_tasks.py::test_sanitise_and_upload_valid_letter"
 reason = "UK fixture address fails NL address validation"
+twin = ["tests/celery/test_tasks_nl.py::test_sanitise_and_upload_valid_letter"]
 
 [[test]]
 nodeid = "tests/celery/test_tasks.py::test_sanitise_international_letters"
@@ -9,6 +10,7 @@ reason = "UK fixture address fails NL address validation"
 [[test]]
 nodeid = "tests/celery/test_tasks.py::test_create_pdf_for_templated_letter_happy_path"
 reason = "LetterPrintTemplate also gets the service's letter_address_placement"
+twin = ["tests/celery/test_tasks_nl.py::test_create_pdf_for_templated_letter_happy_path"]
 
 [[test]]
 nodeid = "tests/celery/test_tasks.py::test_create_pdf_for_templated_letter_adds_letter_attachment_if_provided"
@@ -47,6 +49,7 @@ twin = ["tests/test_precompiled_nl.py::test_overlay_template_pdf_colours_pages_i
 [[test]]
 nodeid = "tests/test_precompiled.py::test_precompiled_sanitise_pdf_without_notify_tag"
 reason = "UK fixture address fails NL address validation"
+twin = ["tests/test_precompiled_nl.py::test_precompiled_sanitise_pdf_without_notify_tag"]
 
 [[test]]
 nodeid = "tests/test_precompiled.py::test_precompiled_sanitise_pdf_with_notify_tag"
@@ -65,6 +68,7 @@ twin = ["tests/test_precompiled_nl.py::test_sanitise_precompiled_letter_with_bad
 [[test]]
 nodeid = "tests/test_precompiled.py::test_rewrite_address_block_end_to_end"
 reason = "NL validates the address block but doesn't rewrite it, and the UK fixture addresses fail NL validation"
+counterpart = ["tests/test_precompiled_nl.py::test_rewrite_address_block_keeps_the_pdf_and_returns_the_normalised_address"]
 
 [[test]]
 nodeid = "tests/test_precompiled.py::test_extract_address_block"
@@ -110,6 +114,7 @@ twin = ["tests/test_precompiled_nl.py::test_sanitise_precompiled_letter_with_inv
 [[test]]
 nodeid = "tests/test_preview/test_preview_precompiled.py::test_precompiled_pdf_caches_png_to_s3"
 reason = "NL serialises the page without pickle, so the cache keys differ"
+twin = ["tests/test_preview/test_preview_precompiled_nl.py::test_precompiled_pdf_caches_png_to_s3"]
 
 [[test]]
 nodeid = "tests/test_preview/test_preview_precompiled.py::test_precompiled_pdf_returns_png_from_cache"
@@ -124,10 +129,12 @@ twin = ["tests/test_preview/test_preview_precompiled_nl.py::test_precompiled_pdf
 [[test]]
 nodeid = "tests/test_preview/test_preview_templated.py::test_get_pdf_caches_with_correct_keys"
 reason = "The NL letter template changes the cache keys"
+twin = ["tests/test_preview/test_preview_templated_nl.py::test_get_pdf_caches_with_correct_keys"]
 
 [[test]]
 nodeid = "tests/test_preview/test_preview_templated.py::test_get_png_caches_with_correct_keys"
 reason = "The NL letter template changes the cache keys"
+twin = ["tests/test_preview/test_preview_templated_nl.py::test_get_png_caches_with_correct_keys"]
 
 [[test]]
 nodeid = "tests/test_preview/test_preview_templated.py::test_view_letter_template_png_with_attachment_hits_cache_correct_number_of_times"
@@ -137,6 +144,7 @@ twin = ["tests/test_preview/test_preview_templated_nl.py::test_view_letter_templ
 [[test]]
 nodeid = "tests/test_preview/test_preview_templated.py::test_view_letter_template_png_route_gets_png_for_page[50-2-200]"
 reason = "The NL letter layout fits 50 sentences on one page"
+twin = ["tests/test_preview/test_preview_templated_nl.py::test_view_letter_template_png_route_gets_png_for_page"]
 
 [[test]]
 nodeid = "tests/test_preview/test_preview_templated.py::test_view_letter_template_png_when_requested_page_out_of_range"
@@ -146,6 +154,7 @@ twin = ["tests/test_preview/test_preview_templated_nl.py::test_view_letter_templ
 [[test]]
 nodeid = "tests/test_preview/test_preview_templated.py::test_letter_template_constructed_properly_for_pdf"
 reason = "LetterPreviewTemplate also gets the service's letter_address_placement"
+twin = ["tests/test_preview/test_preview_templated_nl.py::test_letter_template_constructed_properly_for_pdf"]
 
 [[test]]
 nodeid = "tests/test_preview/test_preview_templated.py::test_view_letter_template_pdf_adds_attachment"
@@ -155,7 +164,9 @@ twin = ["tests/test_preview/test_preview_templated_nl.py::test_view_letter_templ
 [[test]]
 nodeid = "tests/test_preview/test_preview_templated.py::test_POST_page_count[50-None-None-None-2]"
 reason = "The NL letter layout fits 50 sentences on one page"
+twin = ["tests/test_preview/test_preview_templated_nl.py::test_POST_page_count"]
 
 [[test]]
 nodeid = "tests/test_preview/test_preview_templated.py::test_page_count_from_cache"
 reason = "The NL letter template changes the cache keys"
+twin = ["tests/test_preview/test_preview_templated_nl.py::test_page_count_from_cache"]

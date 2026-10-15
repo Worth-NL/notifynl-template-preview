@@ -1,15 +1,189 @@
 import base64
 import logging
+from datetime import UTC, datetime
 from io import BytesIO
 
+import pymupdf
+import pytest
 from botocore.exceptions import ClientError as BotoClientError
 from flask import current_app
+from notifications_utils.template import LetterPrintTemplate
 from pypdf import PdfReader
+from reportlab.lib.units import mm
 
 from app import ValidationFailed
-from app.celery.tasks import create_pdf_for_templated_letter, sanitise_and_merge_letter_parts
+from app.celery.tasks import (
+    create_pdf_for_templated_letter,
+    sanitise_and_merge_letter_parts,
+    sanitise_and_upload_letter,
+)
 from tests.celery.test_tasks import _with_message_group_id
 from tests.pdf_consts import blank_page, blank_with_address, multi_page_pdf, no_colour, valid_letter
+from tests.pdf_consts_nl import address_60mm_no_retouradres
+
+DUTCH_ADDRESS = {
+    "address_line_1": "Persoonlijk",
+    "address_line_2": "Coolsingel 40",
+    "address_line_3": "3011 AD  Rotterdam",
+}
+
+
+def test_sanitise_and_upload_valid_letter(mocker, client):
+    valid_file = BytesIO(address_60mm_no_retouradres)
+
+    mocker.patch("app.celery.tasks.s3download", return_value=valid_file)
+    mock_upload = mocker.patch("app.celery.tasks.s3upload")
+    mock_celery = mocker.patch("app.celery.tasks.notify_celery.send_task")
+    mock_backup_original = mocker.patch("app.celery.tasks.copy_s3_object")
+
+    with _with_message_group_id("test-message-group-id"):
+        sanitise_and_upload_letter("abc-123", "filename.pdf")
+
+    mock_upload.assert_called_once_with(
+        filedata=mocker.ANY,
+        region=current_app.config["AWS_REGION"],
+        bucket_name=current_app.config["SANITISED_LETTER_BUCKET_NAME"],
+        file_location="filename.pdf",
+    )
+
+    encoded_task_args = current_app.signing_client.encode(
+        {
+            "page_count": 1,
+            "message": None,
+            "invalid_pages": None,
+            "validation_status": "passed",
+            "filename": "filename.pdf",
+            "notification_id": "abc-123",
+            "address": "Persoonlijk\nCoolsingel 40\n3011 AD  ROTTERDAM",
+        }
+    )
+
+    mock_celery.assert_called_once_with(
+        args=(encoded_task_args,),
+        name="process-sanitised-letter",
+        queue="letter-tasks",
+        MessageGroupId="test-message-group-id",
+    )
+
+    mock_backup_original.assert_called_once_with(
+        current_app.config["LETTERS_SCAN_BUCKET_NAME"],
+        "filename.pdf",
+        current_app.config["PRECOMPILED_ORIGINALS_BACKUP_LETTER_BUCKET_NAME"],
+        "abc-123.pdf",
+    )
+
+
+@pytest.mark.parametrize("letter_address_placement", ["50mm", "60mm"])
+@pytest.mark.parametrize(
+    "logo_filename, expected_logo_filename_value",
+    (
+        ("hm-government", "hm-government.svg"),
+        (None, None),
+    ),
+)
+@pytest.mark.parametrize(
+    "key_type,bucket_name",
+    [
+        ("test", "TEST_LETTERS_BUCKET_NAME"),
+        ("normal", "LETTERS_PDF_BUCKET_NAME"),
+    ],
+)
+@pytest.mark.parametrize(
+    "date_argument, expected_date_value",
+    (
+        ({}, None),
+        ({"date": None}, None),
+        ({"date": "2026-02-06T01:02:03.000000+00:00"}, datetime(2026, 2, 6, 1, 2, 3, tzinfo=UTC)),
+    ),
+)
+def test_create_pdf_for_templated_letter_happy_path(
+    mocker,
+    client,
+    data_for_create_pdf_for_templated_letter_task,
+    mock_weasyprint_logos,
+    key_type,
+    bucket_name,
+    logo_filename,
+    expected_logo_filename_value,
+    date_argument,
+    expected_date_value,
+    letter_address_placement,
+    caplog,
+):
+    # create a pdf for templated letter using data from API, upload the pdf to the final S3 bucket,
+    # and send data back to API so that it can update notification status and billable units.
+    mock_upload = mocker.patch("app.celery.tasks.s3upload")
+    mock_celery = mocker.patch("app.celery.tasks.notify_celery.send_task")
+    mock_utils_template = mocker.patch("app.celery.tasks.LetterPrintTemplate", wraps=LetterPrintTemplate)
+
+    data_for_create_pdf_for_templated_letter_task["logo_filename"] = logo_filename
+    data_for_create_pdf_for_templated_letter_task["key_type"] = key_type
+    data_for_create_pdf_for_templated_letter_task["values"] |= DUTCH_ADDRESS
+    data_for_create_pdf_for_templated_letter_task["letter_address_placement"] = letter_address_placement
+    data_for_create_pdf_for_templated_letter_task |= date_argument
+
+    encoded_data = current_app.signing_client.encode(data_for_create_pdf_for_templated_letter_task)
+
+    with (
+        caplog.at_level(logging.INFO),
+        _with_message_group_id("test-message-group-id"),
+    ):
+        create_pdf_for_templated_letter(encoded_data)
+
+    mock_utils_template.assert_called_once_with(
+        {
+            "id": 1,
+            "template_type": "letter",
+            "letter_languages": "english",
+            "subject": "letter subject",
+            "content": "letter content with ((placeholder))",
+            "letter_welsh_subject": None,
+            "letter_welsh_content": None,
+            "updated_at": "2017-08-01",
+            "version": 1,
+            "service": "1234",
+        },
+        values={
+            "placeholder": "abc",
+            **DUTCH_ADDRESS,
+        },
+        contact_block="123",
+        admin_base_url="https://static-logos.notify.tools/letters",
+        logo_file_name=expected_logo_filename_value,
+        language="english",
+        includes_first_page=True,
+        date=expected_date_value,
+        letter_address_placement=letter_address_placement,
+    )
+
+    mock_upload.assert_called_once_with(
+        filedata=mocker.ANY,
+        region=current_app.config["AWS_REGION"],
+        bucket_name=current_app.config[bucket_name],
+        file_location="MY_LETTER.PDF",
+        metadata=None,
+    )
+
+    mock_celery.assert_called_once_with(
+        kwargs={"notification_id": "abc-123", "page_count": 1},
+        name="update-billable-units-for-letter",
+        queue="letter-tasks",
+        MessageGroupId="test-message-group-id",
+    )
+    assert "Creating a pdf for notification with id abc-123" in caplog.messages
+    assert (
+        f"Uploaded letters PDF MY_LETTER.PDF to {current_app.config[bucket_name]} for notification id abc-123"
+        in caplog.messages
+    )
+
+    assert not any(r.levelname == "ERROR" for r in caplog.records)
+    assert "NOTIFY" in PdfReader(mock_upload.call_args_list[0][1]["filedata"]).pages[0].extract_text()
+
+    # the address moves with the envelope window: its first line starts in the top 10mm of the window
+    first_page = pymupdf.open(stream=mock_upload.call_args.kwargs["filedata"].getvalue(), filetype="pdf")[0]
+    first_address_line_top = first_page.search_for("Persoonlijk")[0].y0 / mm
+    window_top = float(letter_address_placement.removesuffix("mm"))
+    assert window_top <= first_address_line_top < window_top + 10
 
 
 def _sanitise_result(page_count, file_bytes, address=None):
