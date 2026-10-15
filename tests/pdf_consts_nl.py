@@ -3,7 +3,13 @@ from io import BytesIO
 from pypdf import PdfWriter, Transformation
 from reportlab.lib.units import mm
 
-from tests.pdf_consts import address_with_large_space_in_a_line, address_with_multiple_unusual_coordinates, file
+from tests.pdf_consts import (
+    address_where_paragraphs_do_not_match_visual_order,
+    address_with_large_space_in_a_line,
+    address_with_multiple_unusual_coordinates,
+    address_with_unusual_coordinates,
+    file,
+)
 
 
 def moved_down(pdf, distance_mm):
@@ -24,8 +30,12 @@ address_60mm_with_retouradres = file("tests/test_pdfs/address_60mm_with_retourad
 address_with_retouradres_missing_city = file("tests/test_pdfs/address_with_retouradres_missing_city.pdf")
 address_with_retouradres_missing_postcode = file("tests/test_pdfs/address_with_retouradres_missing_postcode.pdf")
 
-# Upstream's address extraction fixtures have their address at 43-64mm from the top, in the UK address window. 20mm
-# lower it sits at 63-84mm, inside both NL address windows (50-90mm and 60-100mm), and the explanatory text below it
-# moves to 123mm, still outside them.
+# Upstream's address extraction fixtures have their address between 39 and 66mm from the top, in the UK address window.
+# 20mm lower it sits between 59 and 86mm, inside both NL address windows (50-90mm and 60-100mm), and the explanatory
+# text below it moves to 115mm or lower, still outside them.
+address_with_unusual_coordinates_nl = moved_down(address_with_unusual_coordinates, 20)
 address_with_multiple_unusual_coordinates_nl = moved_down(address_with_multiple_unusual_coordinates, 20)
 address_with_large_space_in_a_line_nl = moved_down(address_with_large_space_in_a_line, 20)
+address_where_paragraphs_do_not_match_visual_order_nl = moved_down(
+    address_where_paragraphs_do_not_match_visual_order, 20
+)

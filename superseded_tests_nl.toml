@@ -6,6 +6,7 @@ twin = ["tests/celery/test_tasks_nl.py::test_sanitise_and_upload_valid_letter"]
 [[test]]
 nodeid = "tests/celery/test_tasks.py::test_sanitise_international_letters"
 reason = "UK fixture address fails NL address validation"
+twin = ["tests/celery/test_tasks_nl.py::test_sanitise_international_letters"]
 
 [[test]]
 nodeid = "tests/celery/test_tasks.py::test_create_pdf_for_templated_letter_happy_path"
@@ -20,6 +21,7 @@ twin = ["tests/celery/test_tasks_nl.py::test_create_pdf_for_templated_letter_add
 [[test]]
 nodeid = "tests/celery/test_tasks.py::test_recreate_pdf_for_precompiled_letter"
 reason = "UK fixture address fails NL address validation"
+twin = ["tests/celery/test_tasks_nl.py::test_recreate_pdf_for_precompiled_letter"]
 
 [[test]]
 nodeid = "tests/test_exception_hooks.py::TestPDFLibraryErrors::test_weasyprint_svg_warning_is_routed_to_kibana"
@@ -54,6 +56,7 @@ twin = ["tests/test_precompiled_nl.py::test_precompiled_sanitise_pdf_without_not
 [[test]]
 nodeid = "tests/test_precompiled.py::test_precompiled_sanitise_pdf_with_notify_tag"
 reason = "UK fixture address fails NL address validation"
+twin = ["tests/test_precompiled_nl.py::test_precompiled_sanitise_pdf_with_notify_tag"]
 
 [[test]]
 nodeid = "tests/test_precompiled.py::test_precompiled_sanitise_pdf_with_colour_in_address_margin_returns_400"
@@ -78,6 +81,7 @@ twin = ["tests/test_precompiled_nl.py::test_extract_address_block"]
 [[test]]
 nodeid = "tests/test_precompiled.py::test_extract_address_block_handles_address_with_ligatures_in_different_fonts"
 reason = "UK-positioned fixture falls outside the NL address window"
+twin = ["tests/test_precompiled_nl.py::test_extract_address_block_handles_address_with_ligatures_in_different_fonts"]
 
 [[test]]
 nodeid = "tests/test_precompiled.py::test_extract_address_block_handles_address_with_different_coordinates"
@@ -92,6 +96,7 @@ twin = ["tests/test_precompiled_nl.py::test_extract_address_block_handles_addres
 [[test]]
 nodeid = "tests/test_precompiled.py::test_extract_address_block_when_address_paragraphs_do_not_match_visual_order"
 reason = "UK-positioned fixture falls outside the NL address window"
+twin = ["tests/test_precompiled_nl.py::test_extract_address_block_when_address_paragraphs_do_not_match_visual_order"]
 
 [[test]]
 nodeid = "tests/test_precompiled.py::test_redact_precompiled_letter_address_block_redacts_address_block"

@@ -19,6 +19,7 @@ from app.precompiled import (
     DEFAULT_LETTER_ADDRESS_PLACEMENT,
     NOTIFY_TAG_BOUNDING_BOX,
     _other_letter_address_placement,
+    add_notify_tag_to_letter,
     check_notify_tag_area_for_encroachment,
     extract_address_block,
     get_invalid_pages_with_message,
@@ -37,10 +38,12 @@ from tests.pdf_consts_nl import (
     address_50mm_with_retouradres,
     address_60mm_no_retouradres,
     address_60mm_with_retouradres,
+    address_where_paragraphs_do_not_match_visual_order_nl,
     address_with_large_space_in_a_line_nl,
     address_with_multiple_unusual_coordinates_nl,
     address_with_retouradres_missing_city,
     address_with_retouradres_missing_postcode,
+    address_with_unusual_coordinates_nl,
 )
 
 
@@ -573,3 +576,61 @@ def test_extract_address_block_handles_address_with_a_large_amount_of_whitespace
             "SW1A 1AA",
         ]
     )
+
+
+def test_precompiled_sanitise_pdf_with_notify_tag(client, auth_header):
+    # upstream's fixture can't be moved into the NL address window without moving its NOTIFY tag too, so tag a Dutch
+    # letter instead
+    notify_tag_on_first_page = add_notify_tag_to_letter(BytesIO(address_60mm_no_retouradres)).getvalue()
+    assert is_notify_tag_present(BytesIO(notify_tag_on_first_page))
+
+    response = client.post(
+        url_for("precompiled_blueprint.sanitise_precompiled_letter"),
+        data=notify_tag_on_first_page,
+        headers={"Content-type": "application/json", **auth_header},
+    )
+    assert response.status_code == 200
+    assert response.json == {
+        "message": None,
+        "file": ANY,
+        "page_count": 1,
+        "recipient_address": "Persoonlijk\nCoolsingel 40\n3011 AD  ROTTERDAM",
+        "invalid_pages": None,
+    }
+
+    pdf = BytesIO(base64.b64decode(response.json["file"].encode()))
+    assert is_notify_tag_present(pdf)
+
+
+@pytest.mark.parametrize("letter_address_placement", ["50mm", "60mm"])
+def test_extract_address_block_handles_address_with_ligatures_in_different_fonts(
+    client, caplog, letter_address_placement
+):
+    # "quick maffs defied" should be on the same line. If address lines are grouped by line, this works correctly.
+    # If address lines are grouped by y2, the address is not split up correctly.
+    address = extract_address_block(
+        BytesIO(address_with_unusual_coordinates_nl), letter_address_placement=letter_address_placement
+    )
+
+    assert address.raw_address == "\n".join(
+        [
+            "First line",
+            "quick maffs defied",  # note that the ﬀ ligature here has been converted into two f characters
+            "SE1 1AA",
+        ]
+    )
+
+
+@pytest.mark.parametrize("letter_address_placement", ["50mm", "60mm"])
+def test_extract_address_block_when_address_paragraphs_do_not_match_visual_order(client, letter_address_placement):
+    # This test documents a current rare edge case where address extraction doesn't behave as we want due.
+    # Visually, the address is ordered "normally" with the postcode on the last line and user name on line 1.
+    # In the underlying structure of the PDF, which PyMyPDF uses to split up the address, the order is different.
+    # Each address line is its own paragraph, and these are ordered differently from the visual order.
+    # The address we extract follows the structure of the PDF, not the visual order.
+    address = extract_address_block(
+        BytesIO(address_where_paragraphs_do_not_match_visual_order_nl),
+        letter_address_placement=letter_address_placement,
+    )
+
+    assert address.raw_address == "\n".join(["County", "My User", "SW1 1AA", "42 The Parkway", "City"])

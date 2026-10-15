@@ -3,22 +3,26 @@ import logging
 from datetime import UTC, datetime
 from io import BytesIO
 
+import boto3
 import pymupdf
 import pytest
 from botocore.exceptions import ClientError as BotoClientError
 from flask import current_app
+from moto import mock_aws
 from notifications_utils.template import LetterPrintTemplate
 from pypdf import PdfReader
 from reportlab.lib.units import mm
 
+import app.celery.tasks
 from app import ValidationFailed
 from app.celery.tasks import (
     create_pdf_for_templated_letter,
+    recreate_pdf_for_precompiled_letter,
     sanitise_and_merge_letter_parts,
     sanitise_and_upload_letter,
 )
 from tests.celery.test_tasks import _with_message_group_id
-from tests.pdf_consts import blank_page, blank_with_address, multi_page_pdf, no_colour, valid_letter
+from tests.pdf_consts import bad_postcode, blank_page, blank_with_address, multi_page_pdf, no_colour, valid_letter
 from tests.pdf_consts_nl import address_60mm_no_retouradres
 
 DUTCH_ADDRESS = {
@@ -70,6 +74,50 @@ def test_sanitise_and_upload_valid_letter(mocker, client):
         "filename.pdf",
         current_app.config["PRECOMPILED_ORIGINALS_BACKUP_LETTER_BUCKET_NAME"],
         "abc-123.pdf",
+    )
+
+
+@pytest.mark.parametrize(
+    "extra_args, expected_error",
+    (
+        ({}, "not-a-real-uk-postcode"),
+        ({"allow_international_letters": False}, "not-a-real-uk-postcode"),
+        ({"allow_international_letters": True}, "not-a-real-uk-postcode-or-country"),
+    ),
+)
+def test_sanitise_international_letters(
+    mocker,
+    client,
+    extra_args,
+    expected_error,
+):
+    mocker.patch("app.celery.tasks.s3download", return_value=BytesIO(bad_postcode))
+    mock_upload = mocker.patch("app.celery.tasks.s3upload")
+    mock_celery = mocker.patch("app.celery.tasks.notify_celery.send_task")
+
+    # the fixture's address is laid out at the 50mm position; validated against the 60mm default window it fails with
+    # not-enough-address-lines instead, so this also checks the task passes the placement on
+    with _with_message_group_id("test-message-group-id"):
+        sanitise_and_upload_letter("abc-123", "filename.pdf", letter_address_placement="50mm", **extra_args)
+
+    encoded_task_args = current_app.signing_client.encode(
+        {
+            "page_count": 1,
+            "message": expected_error,
+            "invalid_pages": [1],
+            "validation_status": "failed",
+            "filename": "filename.pdf",
+            "notification_id": "abc-123",
+            "address": None,
+        }
+    )
+
+    assert not mock_upload.called
+    mock_celery.assert_called_once_with(
+        args=(encoded_task_args,),
+        name="process-sanitised-letter",
+        queue="letter-tasks",
+        MessageGroupId="test-message-group-id",
     )
 
 
@@ -565,3 +613,46 @@ def test_create_pdf_for_templated_letter_dispatches_validation_failed_for_bad_ad
         current_app.config["LETTERS_SCAN_BUCKET_NAME"], "abc-123/attachment-1.pdf"
     )
     mock_boto3.resource.return_value.Object.return_value.delete.assert_called_once()
+
+
+@mock_aws
+def test_recreate_pdf_for_precompiled_letter(mocker, client):
+    # create backup S3 bucket and an S3 bucket for the final letters that will be sent to DVLA
+    conn = boto3.resource("s3", region_name=current_app.config["AWS_REGION"])
+    backup_bucket = conn.create_bucket(
+        Bucket=current_app.config["PRECOMPILED_ORIGINALS_BACKUP_LETTER_BUCKET_NAME"],
+        CreateBucketConfiguration={"LocationConstraint": "eu-west-1"},
+    )
+    final_letters_bucket = conn.create_bucket(
+        Bucket=current_app.config["LETTERS_PDF_BUCKET_NAME"],
+        CreateBucketConfiguration={"LocationConstraint": "eu-west-1"},
+    )
+
+    # put a valid PDF in the backup S3 bucket
+    valid_file = BytesIO(address_60mm_no_retouradres)
+    s3 = boto3.client("s3", region_name="eu-west-1")
+    s3.put_object(
+        Bucket=current_app.config["PRECOMPILED_ORIGINALS_BACKUP_LETTER_BUCKET_NAME"],
+        Key="1234-abcd.pdf",
+        Body=valid_file.read(),
+    )
+
+    sanitise_spy = mocker.spy(app.celery.tasks, "sanitise_file_contents")
+
+    recreate_pdf_for_precompiled_letter("1234-abcd", "2021-10-10/NOTIFY.REF.D.2.C.202110101330.PDF", True)
+
+    # backup PDF still exists in the backup bucket
+    assert [o.key for o in backup_bucket.objects.all()] == ["1234-abcd.pdf"]
+    # the final letters bucket contains the recreated PDF
+    assert [o.key for o in final_letters_bucket.objects.all()] == ["2021-10-10/NOTIFY.REF.D.2.C.202110101330.PDF"]
+
+    # Check that the file in the final letters bucket has been through the `sanitise_file_contents` function
+    sanitised_file_contents = (
+        conn.Object(
+            current_app.config["LETTERS_PDF_BUCKET_NAME"],
+            "2021-10-10/NOTIFY.REF.D.2.C.202110101330.PDF",
+        )
+        .get()["Body"]
+        .read()
+    )
+    assert base64.b64decode(sanitise_spy.spy_return["file"].encode()) == sanitised_file_contents
