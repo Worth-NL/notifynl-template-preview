@@ -125,7 +125,7 @@ def test_rewrite_address_block_keeps_original_error_code_when_retry_also_fails(m
     assert error.value.message == "not-enough-address-lines"
 
 
-def test_sanitise_precompiled_letter_with_bad_address_returns_placement_mismatch_or_original_code(client, auth_header):
+def test_sanitise_precompiled_letter_with_bad_address_returns_400(client, auth_header):
     # NL version of tests/test_precompiled.py::test_sanitise_precompiled_letter_with_bad_address_returns_400,
     # which is skipped upstream (reason="[NOTIFYNL] Broken by validation change") - its fixtures never passed
     # an explicit letter_address_placement, so they now default to "60mm" against fixtures laid out at
@@ -239,7 +239,7 @@ def test_sanitise_precompiled_nl_letter_does_not_log_notify_tag_area_encroachmen
         ("\t", "\\t"),
     ],
 )
-def test_sanitise_precompiled_nl_letter_with_invisible_characters_encroaching_on_notify_tag_area_logging(
+def test_sanitise_precompiled_letter_with_invisible_characters_encroaching_on_notify_tag_area_logging(
     client, auth_header, caplog, encroaching_character, expected_logged_result
 ):
     filename = str(uuid.uuid4())
