@@ -82,10 +82,12 @@ reason = "UK-positioned fixture falls outside the NL address window"
 [[test]]
 nodeid = "tests/test_precompiled.py::test_extract_address_block_handles_address_with_different_coordinates"
 reason = "UK-positioned fixture falls outside the NL address window"
+twin = ["tests/test_precompiled_nl.py::test_extract_address_block_handles_address_with_different_coordinates"]
 
 [[test]]
 nodeid = "tests/test_precompiled.py::test_extract_address_block_handles_address_with_a_large_amount_of_whitespace_in_the_line"
 reason = "UK-positioned fixture falls outside the NL address window"
+twin = ["tests/test_precompiled_nl.py::test_extract_address_block_handles_address_with_a_large_amount_of_whitespace_in_the_line"]
 
 [[test]]
 nodeid = "tests/test_precompiled.py::test_extract_address_block_when_address_paragraphs_do_not_match_visual_order"

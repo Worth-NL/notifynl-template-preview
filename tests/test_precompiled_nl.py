@@ -37,6 +37,8 @@ from tests.pdf_consts_nl import (
     address_50mm_with_retouradres,
     address_60mm_no_retouradres,
     address_60mm_with_retouradres,
+    address_with_large_space_in_a_line_nl,
+    address_with_multiple_unusual_coordinates_nl,
     address_with_retouradres_missing_city,
     address_with_retouradres_missing_postcode,
 )
@@ -530,3 +532,44 @@ def test_rewrite_address_block_keeps_the_pdf_and_returns_the_normalised_address(
 
     assert new_pdf.getvalue() == pdf
     assert address == "Persoonlijk\nCoolsingel 40\n3011 AD  ROTTERDAM"
+
+
+@pytest.mark.parametrize("letter_address_placement", ["50mm", "60mm"])
+def test_extract_address_block_handles_address_with_different_coordinates(client, caplog, letter_address_placement):
+    # If address lines are grouped by y2 this gets split into too many lines.
+    # When grouped by line, it is split correctly into 4 lines.
+    address = extract_address_block(
+        BytesIO(address_with_multiple_unusual_coordinates_nl), letter_address_placement=letter_address_placement
+    )
+
+    assert address.raw_address == "\n".join(
+        [
+            "Recipient SURNAME",
+            "My Street,",
+            "My Town,",
+            "SW1A 1AA",
+        ]
+    )
+    assert "Address extraction different when splitting address by y2 vs by line" in caplog.messages
+
+
+@pytest.mark.parametrize("letter_address_placement", ["50mm", "60mm"])
+def test_extract_address_block_handles_address_with_a_large_amount_of_whitespace_in_the_line(
+    client, letter_address_placement
+):
+    # The PDF has a large space between the words "My" and "Recipient," on the first line.
+    # These should still be considered the same line by PyMuPDF, but this is to check if there are line
+    # detection differences between versions which affect us.
+    address = extract_address_block(
+        BytesIO(address_with_large_space_in_a_line_nl), letter_address_placement=letter_address_placement
+    )
+
+    assert address.raw_address == "\n".join(
+        [
+            "My Recipient,",
+            "My House,",
+            "My Street,",
+            "My Town,",
+            "SW1A 1AA",
+        ]
+    )
