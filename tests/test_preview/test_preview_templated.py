@@ -76,7 +76,6 @@ def test_preview_rejects_if_not_authenticated(client, filetype, headers):
     assert resp.status_code == 401
 
 
-@pytest.mark.skip(reason="[NOTIFYNL] AWS permissions break test.")
 @pytest.mark.parametrize(
     "headers",
     [
@@ -93,7 +92,6 @@ def test_preview_accepts_either_api_key(client, mock_weasyprint_logos, view_lett
     assert resp.status_code == 200
 
 
-@pytest.mark.skip(reason="[NOTIFYNL] AWS permissions break test.")
 def test_return_headers_match_filetype_for_pdf(view_letter_template_pdf, mock_weasyprint_logos):
     resp = view_letter_template_pdf()
 
@@ -101,7 +99,6 @@ def test_return_headers_match_filetype_for_pdf(view_letter_template_pdf, mock_we
     assert resp.headers["Content-Type"] == "application/pdf"
 
 
-@pytest.mark.skip(reason="[NOTIFYNL] AWS permissions break test.")
 def test_return_headers_match_filetype_for_png(view_letter_template_png, mock_weasyprint_logos):
     resp = view_letter_template_png()
 
@@ -109,7 +106,6 @@ def test_return_headers_match_filetype_for_png(view_letter_template_png, mock_we
     assert resp.headers["Content-Type"] == "image/png"
 
 
-@pytest.mark.skip(reason="[NOTIFYNL] AWS permissions break test.")
 @freeze_time("2012-12-12")
 def test_get_pdf_caches_with_correct_keys(
     app,
@@ -134,7 +130,6 @@ def test_get_pdf_caches_with_correct_keys(
     assert mocked_cache_set.call_args[0][3] == expected_cache_key
 
 
-@pytest.mark.skip(reason="[NOTIFYNL] AWS permissions break test.")
 @freeze_time("2012-12-12")
 def test_get_png_caches_with_correct_keys(
     app,
@@ -162,7 +157,6 @@ def test_get_png_caches_with_correct_keys(
     assert mocked_cache_set.call_args_list[1][0][3] == expected_cache_key
 
 
-@pytest.mark.skip(reason="[NOTIFYNL] AWS permissions break test.")
 @pytest.mark.parametrize(
     "cache_get_returns, number_of_cache_get_calls, number_of_cache_set_calls",
     [
@@ -217,7 +211,6 @@ def test_view_letter_template_png_hits_cache_correct_number_of_times(
     assert mocked_cache_set.call_count == number_of_cache_set_calls
 
 
-@pytest.mark.skip(reason="[NOTIFYNL] AWS permissions break test.")
 @pytest.mark.parametrize(
     "cache_get_returns, number_of_cache_get_calls, number_of_cache_set_calls",
     [
@@ -302,7 +295,7 @@ def test_view_letter_template_png_with_attachment_hits_cache_correct_number_of_t
 ):
     mocked_cache_get.side_effect = [cache_response_body(data=b"\x00"), attachment_cache]
 
-    mocker.patch("app.templated.add_attachments_to_letter", return_value=BytesIO(multi_page_pdf))
+    mocker.patch("app.templated.add_attachment_to_letter", return_value=BytesIO(multi_page_pdf))
 
     response = client.post(
         url_for(
@@ -370,7 +363,6 @@ def test_view_letter_template_fails_with_page_arg(
     assert not mocked_hide_notify.called
 
 
-@pytest.mark.skip(reason="[NOTIFYNL] AWS permissions break test.")
 @pytest.mark.parametrize(
     "sentence_count, page_number, expected_response_code",
     [
@@ -415,7 +407,6 @@ def test_view_letter_template_png_route_gets_png_for_page(
     assert not mocked_hide_notify.called
 
 
-@pytest.mark.skip(reason="[NOTIFYNL] AWS permissions break test.")
 def test_view_letter_template_for_letter_attachment(
     client,
     auth_header,
@@ -497,7 +488,6 @@ def test_preview_for_letter_attachment(
     assert response.mimetype == "image/png"
 
 
-@pytest.mark.skip(reason="[NOTIFYNL] AWS permissions break test.")
 @pytest.mark.parametrize("letter_attachment, requested_page", [(None, 2), ({"page_count": 1, "id": "1234"}, 3)])
 def test_view_letter_attachment_preview_when_requested_page_out_of_range(
     client, auth_header, mocker, letter_attachment, requested_page
@@ -526,14 +516,13 @@ def test_view_letter_attachment_preview_when_requested_page_out_of_range(
     )
 
 
-@pytest.mark.skip(reason="[NOTIFYNL] AWS permissions break test.")
 @pytest.mark.parametrize("letter_attachment, requested_page", [(None, 2), ({"page_count": 1, "id": "1234"}, 3)])
 def test_view_letter_template_png_when_requested_page_out_of_range(
     client, auth_header, mock_weasyprint_logos, mocker, mocked_cache_get, letter_attachment, requested_page
 ):
     mocker.patch("app.preview.hide_notify_tag")
     mocker.patch(
-        "app.templated.add_attachments_to_letter", return_value=BytesIO(cmyk_and_rgb_images_in_one_pdf)
+        "app.templated.add_attachment_to_letter", return_value=BytesIO(cmyk_and_rgb_images_in_one_pdf)
     )  # 2-page PDF
     response = client.post(
         url_for(
@@ -562,7 +551,6 @@ def test_view_letter_template_png_when_requested_page_out_of_range(
     assert response.json["message"] == f"400 Bad Request: Letter does not have a page {requested_page}"
 
 
-@pytest.mark.skip(reason="[NOTIFYNL] AWS permissions break test.")
 def test_letter_template_constructed_properly_for_pdf(view_letter_template_request_data, view_letter_template_pdf):
     with patch("app.preview.LetterPreviewTemplate", __str__=Mock(return_value="foo")) as mock_template:
         resp = view_letter_template_pdf()
@@ -582,8 +570,8 @@ def test_letter_template_constructed_properly_for_pdf(view_letter_template_reque
 
 def test_view_letter_template_pdf_adds_attachment(mocker, view_letter_template_request_data, view_letter_template_pdf):
     mock_get_pdf = mocker.patch("app.preview.get_pdf", return_value=BytesIO(b"templated letter pdf"))
-    mock_add_attachments_to_letter = mocker.patch(
-        "app.templated.add_attachments_to_letter", return_value=BytesIO(b"combined pdf")
+    mock_add_attachment_to_letter = mocker.patch(
+        "app.templated.add_attachment_to_letter", return_value=BytesIO(b"combined pdf")
     )
 
     view_letter_template_request_data["template"]["letter_attachment"] = {"page_count": 1, "id": "5678"}
@@ -592,11 +580,10 @@ def test_view_letter_template_pdf_adds_attachment(mocker, view_letter_template_r
 
     assert resp.status_code == 200
     assert resp.get_data() == b"combined pdf"
-    mock_add_attachments_to_letter.assert_called_once_with(
+    mock_add_attachment_to_letter.assert_called_once_with(
         service_id="1234",
         templated_letter_pdf=mock_get_pdf.return_value,
-        fixed_attachment={"page_count": 1, "id": "5678"},
-        adhoc_attachment_pdfs=[],
+        attachment_object={"page_count": 1, "id": "5678"},
     )
 
 
@@ -647,7 +634,6 @@ def test_blank_fields_okay_for_view_letter_template_pdf(
     assert mock_template.called is True
 
 
-@pytest.mark.skip(reason="[NOTIFYNL] AWS permissions break test.")
 def test_date_can_be_passed_for_view_letter_template_pdf(
     mock_weasyprint_logos, view_letter_template_pdf, view_letter_template_request_data
 ):
@@ -660,7 +646,6 @@ def test_date_can_be_passed_for_view_letter_template_pdf(
     assert "12 December 2012" in mock_html.call_args_list[0][1]["string"]
 
 
-@pytest.mark.skip(reason="[NOTIFYNL] AWS permissions break test.")
 @pytest.mark.parametrize(
     "sentence_count, welsh_subject, welsh_content, letter_attachment, expected_pages",
     [
@@ -715,7 +700,6 @@ def test_POST_page_count(
     }
 
 
-@pytest.mark.skip(reason="[NOTIFYNL] AWS permissions break test.")
 @freeze_time("2012-12-12")
 def test_page_count_from_cache(client, auth_header, mocker, mocked_cache_get):
     mocked_cache_get.side_effect = [cache_response_body(multi_page_pdf)]
@@ -758,7 +742,6 @@ def test_returns_500_if_logo_not_found_for_view_letter_template_pdf(app, view_le
     assert response.status_code == 500
 
 
-@pytest.mark.skip(reason="[NOTIFYNL] AWS permissions break test.")
 @pytest.mark.parametrize(
     "logo, is_svg_expected",
     [
@@ -772,33 +755,3 @@ def test_get_html(logo, is_svg_expected, view_letter_template_request_data, clie
 
     output_html = get_html(view_letter_template_request_data)
     assert (image_tag in output_html) is is_svg_expected
-
-
-@pytest.mark.parametrize(
-    "letter_address_placement, expected_class",
-    [
-        ("60mm", "pingen"),
-        ("50mm", ""),
-        # None (unspecified) now defaults to "60mm", matching Service.letter_address_placement's
-        # own DB default - see notifynl-utils' LetterPreviewTemplate default.
-        (None, "pingen"),
-    ],
-)
-def test_get_html_applies_letter_address_placement(
-    view_letter_template_request_data, letter_address_placement, expected_class, client
-):
-    view_letter_template_request_data["filename"] = None
-    view_letter_template_request_data["letter_address_placement"] = letter_address_placement
-
-    output_html = get_html(view_letter_template_request_data)
-
-    assert f'class="recipient-address align-with-envelope-window {expected_class}">' in output_html
-
-
-def test_get_html_defaults_letter_address_placement_to_60mm_when_key_absent(view_letter_template_request_data, client):
-    view_letter_template_request_data["filename"] = None
-    assert "letter_address_placement" not in view_letter_template_request_data
-
-    output_html = get_html(view_letter_template_request_data)
-
-    assert 'class="recipient-address align-with-envelope-window pingen">' in output_html
