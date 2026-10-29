@@ -7,6 +7,7 @@ import pytest
 from flask import url_for
 from freezegun import freeze_time
 from notifications_utils.s3 import S3ObjectNotFound
+from weasyprint.pdf import fonts as weasyprint_fonts
 
 from app.preview import get_html
 from tests.conftest import cache_response_body
@@ -70,7 +71,15 @@ def test_get_png_caches_with_correct_keys(
     mocked_cache_get,
     mocked_cache_set,
 ):
-    expected_cache_key = "pngs/beda886e5e32dade833b7aade94c3340902cfb65.png"
+    if weasyprint_fonts.harfbuzz_subset is None:
+        pytest.fail(
+            "WeasyPrint is using the fontTools fallback; run the tests in the Dockerfile_nl test image "
+            "(libharfbuzz-subset0)"
+        )
+
+    # the key hashes the rendered PDF, including font subsets made by the Dockerfile_nl image's HarfBuzz,
+    # so a HarfBuzz or font package change in that image changes it
+    expected_cache_key = "pngs/1953faafc5949b0ca76a7d25d5ece53097539b4b.png"
     resp = view_letter_template_png()
 
     assert resp.status_code == 200

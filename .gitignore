@@ -408,6 +408,8 @@ pyrightconfig.json
 [Ll]ib64
 [Ll]ocal
 [Ss]cripts
+# [NOTIFYNL] re-include the repo's own scripts/ dir (the rule above targets Windows venv Scripts\)
+!/scripts/
 pyvenv.cfg
 pip-selfcheck.json
 
@@ -915,3 +917,6 @@ environment.sh
 
 commit
 docker/Arial.ttf
+
+# [NOTIFYNL] local Trivy scan output
+.vulnerability-scan/

@@ -30,58 +30,43 @@ jobs:
       actions: read
       checks: write
 
-    strategy:
-      matrix:
-        python-version: ["3.13"]
-
     env:
       LETTER_LOGO_URL: ${{ secrets.LETTER_LOGO_URL }}
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
     steps:
-      - uses: szenius/set-timezone@v2.0
-        with:
-          timezoneLinux: "Europe/Amsterdam"
-
       - uses: actions/checkout@v4
-
-      - name: Accept Microsoft Core Fonts EULA
-        run: |
-          echo ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true | sudo debconf-set-selections
-
-      - uses: gerlero/apt-install@v1
-        with:
-          packages: build-essential git libcurl4-openssl-dev curl libssl-dev cmake libmagickwand-dev weasyprint ghostscript libmagic-dev libpoppler-cpp-dev poppler-utils ttf-mscorefonts-installer libpng-dev libjpeg-dev libtiff-dev imagemagick ttf-mscorefonts-installer
-          install-recommends: false
-
-      - uses: astral-sh/setup-uv@v6
-        with:
-          python-version: ${{ matrix.python-version }}
-          activate-environment: true
-          enable-cache: true
-          cache-dependency-glob: |
-            requirements_nl_test.txt
-
-      - name: Install application requirements (pip)
-        run: uv pip install -r requirements_nl_test.txt
 
       - uses: astral-sh/ruff-action@v3
         with:
           version-file: requirements_nl_test.txt
 
-      - name: Generate version file
-        run: make generate-version-file
+      - uses: docker/setup-buildx-action@v3
+
+      # Tests run in the Dockerfile_nl test image (built on the production stage), so they use the same
+      # Debian libraries as production, e.g. WeasyPrint's HarfBuzz font subsetting
+      - uses: docker/build-push-action@v6
+        with:
+          file: docker/Dockerfile_nl
+          target: test
+          load: true
+          tags: template-preview:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - name: Check superseded_tests_nl.toml
-        run: pytest --collect-only -qq --nl-verify
+        run: docker run --rm --entrypoint pytest template-preview:test --collect-only -qq --nl-verify
 
-      - uses: pavelzw/pytest-action@v2
-        with:
-          job-summary: false
-          verbose: false
-          emoji: false
-          custom-arguments: --junitxml=reports/pytest-unit.xml
+      - name: Run unit tests
+        run: >-
+          docker run --name unit-tests
+          -e TZ=Europe/Amsterdam -e LETTER_LOGO_URL -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY
+          --entrypoint pytest template-preview:test --junitxml=reports/pytest-unit.xml
+
+      - name: Copy test report out of the container
+        if: ${{ !cancelled() }}
+        run: docker cp unit-tests:/home/vcap/app/reports ./reports
 
       # dorny/test-reporter, with xfailed and superseded tests counted separately from skipped
       - uses: Worth-NL/ci-workflows/.github/actions/pytest-report@main
