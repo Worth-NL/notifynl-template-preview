@@ -17,28 +17,10 @@ jobs:
 
     strategy:
       matrix:
-        python-version: ["3.13"]
         dockerfile-target: ["test"]
 
     steps:
       - uses: actions/checkout@v4
-
-      - uses: gerlero/apt-install@v1
-        with:
-          packages: build-essential git libcurl4-openssl-dev curl libssl-dev libmagickwand-dev weasyprint ghostscript libmagic-dev libpoppler-cpp-dev poppler-utils ttf-mscorefonts-installer libpng-dev libjpeg-dev libtiff-dev imagemagick
-          install-recommends: false
-
-      - uses: astral-sh/setup-uv@v6
-        with:
-          python-version: ${{ matrix.python-version }}
-          activate-environment: true
-          enable-cache: true
-          cache-dependency-glob: |
-            requirements_nl_test.txt
-
-      - name: Install application requirements
-        run: |
-          uv pip install -r requirements_nl_test.txt
 
       - name: Set tag
         id: set-tag
@@ -62,6 +44,16 @@ jobs:
           load: true
           tags: ${{ env.IMAGE }}:${{ steps.set-tag.outputs.tag }}
           target: ${{ matrix.dockerfile-target }}
+
+      - name: Run unit tests in the test image
+        env:
+          LETTER_LOGO_URL: ${{ secrets.LETTER_LOGO_URL }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: >-
+          docker run --rm
+          -e TZ=Europe/Amsterdam -e LETTER_LOGO_URL -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY
+          --entrypoint pytest ${{ env.IMAGE }}:${{ steps.set-tag.outputs.tag }}
 
     outputs:
       tag: ${{ steps.set-tag.outputs.tag }}
