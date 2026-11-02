@@ -11,14 +11,20 @@ from flask import url_for
 from reportlab.lib.colors import black, white
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
 
 from app import ValidationFailed
 from app.precompiled import (
     ADDRESS_LEFT_FROM_LEFT_OF_PAGE,
     DEFAULT_LETTER_ADDRESS_PLACEMENT,
+    FONT,
     NOTIFY_TAG_BOUNDING_BOX,
+    TRUE_TYPE_FONT_FILE,
+    _colour_no_print_areas_of_single_page_pdf_in_red,
     _other_letter_address_placement,
+    _overlay_printable_areas_with_white,
     add_notify_tag_to_letter,
     check_notify_tag_area_for_encroachment,
     extract_address_block,
@@ -634,3 +640,38 @@ def test_extract_address_block_when_address_paragraphs_do_not_match_visual_order
     )
 
     assert address.raw_address == "\n".join(["County", "My User", "SW1 1AA", "42 The Parkway", "City"])
+
+
+def _embedded_font_letter(*lines):
+    """A one-page letter in the embedded Arial only. Each line is (x mm, baseline y mm from the top, text)."""
+    if FONT not in pdfmetrics.getRegisteredFontNames():
+        pdfmetrics.registerFont(TTFont(FONT, TRUE_TYPE_FONT_FILE))
+    buffer = BytesIO()
+    letter = canvas.Canvas(buffer, pagesize=A4, initialFontName=FONT, initialFontSize=10)
+    for x, y, text in lines:
+        letter.drawString(x * mm, A4[1] - y * mm, text)
+    letter.save()
+    return buffer.getvalue()
+
+
+def _unembedded_fonts(pdf):
+    return [font[3] for page in pymupdf.open("pdf", pdf) for font in page.get_fonts() if font[1] == "n/a"]
+
+
+def test_add_notify_tag_to_letter_adds_no_unembedded_font(client):
+    letter = _embedded_font_letter((25, 64, "Worth"))
+
+    tagged = add_notify_tag_to_letter(BytesIO(letter)).getvalue()
+
+    assert is_notify_tag_present(BytesIO(tagged))
+    assert _unembedded_fonts(tagged) == []
+
+
+def test_overlays_add_no_unembedded_font(client):
+    letter = _embedded_font_letter((25, 64, "Worth"))
+
+    whited = _overlay_printable_areas_with_white(BytesIO(letter)).getvalue()
+    reddened = _colour_no_print_areas_of_single_page_pdf_in_red(BytesIO(letter), is_first_page=True).getvalue()
+
+    assert _unembedded_fonts(whited) == []
+    assert _unembedded_fonts(reddened) == []

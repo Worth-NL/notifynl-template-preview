@@ -169,7 +169,11 @@ precompiled_blueprint = Blueprint("precompiled_blueprint", __name__)
 class NotifyCanvas(canvas.Canvas):
     def __init__(self, colour):
         self.packet = BytesIO()
-        super().__init__(self.packet, pagesize=A4)
+        # [NotifyNL] start with the embedded Arial: reportlab's default Helvetica ends up in every overlay and NOTIFY
+        # tag as an unembedded font, after the letter's own fonts were embedded, and print providers (Pingen) flag it
+        if FONT not in pdfmetrics.getRegisteredFontNames():
+            pdfmetrics.registerFont(TTFont(FONT, TRUE_TYPE_FONT_FILE))
+        super().__init__(self.packet, pagesize=A4, initialFontName=FONT)
 
         self.setStrokeColor(colour)
         self.setFillColor(colour)
