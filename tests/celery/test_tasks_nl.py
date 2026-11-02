@@ -24,6 +24,7 @@ from app.celery.tasks import (
 from tests.celery.test_tasks import _with_message_group_id
 from tests.pdf_consts import bad_postcode, blank_page, blank_with_address, multi_page_pdf, no_colour, valid_letter
 from tests.pdf_consts_nl import address_60mm_no_retouradres
+from tests.test_address_window_nl import PINGEN_LETTER_ADDRESS_WINDOW, PINGEN_WINDOW
 
 DUTCH_ADDRESS = {
     "address_line_1": "Persoonlijk",
@@ -656,3 +657,50 @@ def test_recreate_pdf_for_precompiled_letter(mocker, client):
         .read()
     )
     assert base64.b64decode(sanitise_spy.spy_return["file"].encode()) == sanitised_file_contents
+
+
+_FAILED_SANITISATION = {
+    "message": "address-placement-mismatch",
+    "page_count": 1,
+    "invalid_pages": [1],
+    "recipient_address": None,
+    "file": None,
+}
+
+
+@pytest.mark.parametrize(
+    "run_task",
+    [
+        lambda: sanitise_and_upload_letter(
+            "abc-123", "filename.pdf", letter_address_placement="60mm", letter_address_window=PINGEN_WINDOW
+        ),
+        lambda: sanitise_and_merge_letter_parts(
+            "abc-123", ["filename.pdf"], letter_address_placement="60mm", letter_address_window=PINGEN_WINDOW
+        ),
+        lambda: recreate_pdf_for_precompiled_letter(
+            "abc-123", "filename.pdf", False, letter_address_placement="60mm", letter_address_window=PINGEN_WINDOW
+        ),
+    ],
+)
+def test_sanitise_tasks_pass_the_letter_address_window_on(mocker, client, run_task):
+    mocker.patch("app.celery.tasks.s3download", return_value=BytesIO(b"pdf"))
+    mock_sanitise = mocker.patch("app.celery.tasks.sanitise_file_contents", return_value=_FAILED_SANITISATION)
+    mocker.patch("app.celery.tasks.s3upload")
+    mocker.patch("app.celery.tasks.notify_celery.send_task")
+
+    with _with_message_group_id("test-message-group-id"):
+        run_task()
+
+    assert mock_sanitise.call_args.kwargs["letter_address_placement"] == "60mm"
+    assert mock_sanitise.call_args.kwargs["letter_address_window"] == PINGEN_LETTER_ADDRESS_WINDOW
+
+
+def test_sanitise_task_without_a_letter_address_window(mocker, client):
+    mocker.patch("app.celery.tasks.s3download", return_value=BytesIO(b"pdf"))
+    mock_sanitise = mocker.patch("app.celery.tasks.sanitise_file_contents", return_value=_FAILED_SANITISATION)
+    mocker.patch("app.celery.tasks.notify_celery.send_task")
+
+    with _with_message_group_id("test-message-group-id"):
+        sanitise_and_upload_letter("abc-123", "filename.pdf", letter_address_placement="50mm")
+
+    assert mock_sanitise.call_args.kwargs["letter_address_window"] is None
