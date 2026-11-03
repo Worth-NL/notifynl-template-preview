@@ -161,6 +161,8 @@ def body_top_from_top_of_page(letter_address_window):
 
 # [NotifyNL] The first page's geometry comes from a LetterAddressWindow (app/address_window_nl.py) that notifynl-api
 # sends. These give the window template-preview always used for a placement, for callers that send none.
+# notifynl-api's LETTER_ADDRESS_WINDOWS repeats the standard windows' numbers, and its copy is the one that applies to
+# every letter it sends: change both together.
 def standard_letter_address_window(letter_address_placement):
     if letter_address_placement not in ADDRESS_TOP_FROM_TOP_OF_PAGE_BY_PLACEMENT:
         letter_address_placement = DEFAULT_LETTER_ADDRESS_PLACEMENT
@@ -819,6 +821,9 @@ def _overlay_printable_areas_with_white(
     This doesn't affect the red overlays we draw when displaying to end users, so people should still layout their PDFs
     based on the published constraints.
 
+    [NotifyNL] Except for a window with a postage area (Pingen's): its postage and address areas get no extra 1mm, see
+    _overlay_printable_areas_around_postage_area_with_white.
+
     For letter attachments, there is no address page, so we overlay all pages like we would subsequent pages
     of a full letter.
 
@@ -917,7 +922,11 @@ def _overlay_printable_areas_around_postage_area_with_white(can, letter_address_
     """
     [NotifyNL] For a print provider's own window (Pingen's): everything inside the border is printable except its
     postage area around the address area, where the provider's envelope window and postage marks go. Unlike the other
-    boundaries, the postage area's edges get no extra 1mm: the provider checks them exactly.
+    boundaries, the postage and address areas' edges get no extra 1mm: the provider checks them exactly.
+
+    Anti-aliasing doesn't make that stricter than the provider: content flush with the address area's edges still
+    passes, because the white overlay covers the same partly-covered edge pixels. Content past an edge fails within a
+    pixel (0.13mm at 200 dpi): from 0.02 to 0.15mm past it, depending on where the edge falls inside a pixel.
     """
     postage = letter_address_window.postage_area
     address = letter_address_window.address_area
