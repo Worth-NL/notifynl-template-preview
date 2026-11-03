@@ -704,8 +704,7 @@ def add_notify_tag_to_letter(src_pdf):
 
     pdf = PdfReader(src_pdf)
     page = pdf.pages[0]
-    can = NotifyCanvas(white)
-    pdfmetrics.registerFont(TTFont(FONT, TRUE_TYPE_FONT_FILE))
+    can = NotifyCanvas(white)  # [NotifyNL] which registers FONT
     can.setFont(FONT, NOTIFY_TAG_FONT_SIZE)
 
     x = NOTIFY_TAG_FROM_LEFT_OF_PAGE * mm
