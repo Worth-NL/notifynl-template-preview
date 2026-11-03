@@ -21,10 +21,10 @@ from app.celery.tasks import (
     sanitise_and_merge_letter_parts,
     sanitise_and_upload_letter,
 )
+from tests.address_window_consts_nl import PINGEN_LETTER_ADDRESS_WINDOW, PINGEN_WINDOW
 from tests.celery.test_tasks import _with_message_group_id
 from tests.pdf_consts import bad_postcode, blank_page, blank_with_address, multi_page_pdf, no_colour, valid_letter
 from tests.pdf_consts_nl import address_60mm_no_retouradres
-from tests.test_address_window_nl import PINGEN_LETTER_ADDRESS_WINDOW, PINGEN_WINDOW
 
 DUTCH_ADDRESS = {
     "address_line_1": "Persoonlijk",

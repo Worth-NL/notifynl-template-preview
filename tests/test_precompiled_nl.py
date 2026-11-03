@@ -38,6 +38,7 @@ from app.precompiled import (
     rewrite_address_block,
     standard_letter_address_window,
 )
+from tests.address_window_consts_nl import PINGEN_WINDOW
 from tests.pdf_consts import (
     address_margin,
     bad_postcode,
@@ -57,7 +58,6 @@ from tests.pdf_consts_nl import (
     address_with_retouradres_missing_postcode,
     address_with_unusual_coordinates_nl,
 )
-from tests.test_address_window_nl import PINGEN_WINDOW
 
 
 @pytest.mark.parametrize(

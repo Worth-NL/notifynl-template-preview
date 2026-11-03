@@ -3,23 +3,9 @@ import json
 import pytest
 
 from app import InvalidRequest
-from app.address_window_nl import Area, LetterAddressWindow, parse_letter_address_window
+from app.address_window_nl import parse_letter_address_window
 from app.precompiled import address_bounding_box, standard_letter_address_window
-
-PINGEN_WINDOW = {
-    "id": "pingen",
-    "provider": "pingen",
-    "address_placement": "60mm",
-    "address_area": {"x": 22, "y": 60, "width": 85.5, "height": 25.5},
-    "postage_area": {"x": 20, "y": 40, "width": 89.5, "height": 47.5},
-}
-
-PINGEN_LETTER_ADDRESS_WINDOW = LetterAddressWindow(
-    id="pingen",
-    address_placement="60mm",
-    address_area=Area(x=22, y=60, width=85.5, height=25.5),
-    postage_area=Area(x=20, y=40, width=89.5, height=47.5),
-)
+from tests.address_window_consts_nl import PINGEN_LETTER_ADDRESS_WINDOW, PINGEN_WINDOW
 
 
 @pytest.mark.parametrize("value", [PINGEN_WINDOW, json.dumps(PINGEN_WINDOW)])
