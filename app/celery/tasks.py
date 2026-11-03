@@ -15,7 +15,6 @@ from notifications_utils.template import LetterPrintTemplate
 from weasyprint import HTML
 
 from app import ValidationFailed, notify_celery
-from app.address_window_nl import parse_letter_address_window
 from app.config import QueueNames, TaskNames, TaskNamesNL
 from app.precompiled import DEFAULT_LETTER_ADDRESS_PLACEMENT, sanitise_file_contents
 from app.preview import get_page_count_for_pdf
@@ -44,7 +43,7 @@ def sanitise_and_upload_letter(
             allow_international_letters=allow_international_letters,
             filename=filename,
             letter_address_placement=letter_address_placement or DEFAULT_LETTER_ADDRESS_PLACEMENT,
-            letter_address_window=parse_letter_address_window(letter_address_window),
+            letter_address_window=letter_address_window,
         )
 
         # Only files that have failed sanitisation have 'message' in the sanitisation_details dict
@@ -140,7 +139,7 @@ def sanitise_and_merge_letter_parts(
                 filename=filename,
                 is_an_attachment=part_index > 0,
                 letter_address_placement=letter_address_placement or DEFAULT_LETTER_ADDRESS_PLACEMENT,
-                letter_address_window=parse_letter_address_window(letter_address_window),
+                letter_address_window=letter_address_window,
             )
 
             if sanitisation_details.get("message"):
@@ -474,7 +473,7 @@ def recreate_pdf_for_precompiled_letter(
             allow_international_letters=allow_international_letters,
             filename=file_location,
             letter_address_placement=letter_address_placement or DEFAULT_LETTER_ADDRESS_PLACEMENT,
-            letter_address_window=parse_letter_address_window(letter_address_window),
+            letter_address_window=letter_address_window,
         )
 
         # Only files that have failed sanitisation have 'message' in the sanitisation_details dict

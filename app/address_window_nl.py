@@ -7,9 +7,12 @@ which is the geometry template-preview always had.
 """
 
 import json
+import math
 from dataclasses import dataclass
 
 from app import InvalidRequest
+
+A4_WIDTH, A4_HEIGHT = 210, 297  # mm
 
 
 @dataclass(frozen=True)
@@ -50,10 +53,12 @@ class LetterAddressWindow:
 def parse_letter_address_window(value):
     """
     Builds the window from what a caller sent: a dict (a Celery task's kwarg), a JSON string (a query parameter) or
-    nothing, which gives None.
+    nothing, which gives None. A window that is already built is returned as it is.
     """
     if not value:
         return None
+    if isinstance(value, LetterAddressWindow):
+        return value
 
     try:
         if isinstance(value, str):
@@ -75,6 +80,11 @@ def parse_letter_address_window(value):
 
 def _area(value):
     area = Area(**{key: float(value[key]) for key in ("x", "y", "width", "height")})
+    # json.loads reads NaN and Infinity, which no comparison below would reject
+    if not all(math.isfinite(number) for number in (area.x, area.y, area.width, area.height)):
+        raise ValueError(f"not an area on the page: {value}")
     if area.x < 0 or area.y < 0 or area.width <= 0 or area.height <= 0:
+        raise ValueError(f"not an area on the page: {value}")
+    if area.right > A4_WIDTH or area.bottom > A4_HEIGHT:
         raise ValueError(f"not an area on the page: {value}")
     return area

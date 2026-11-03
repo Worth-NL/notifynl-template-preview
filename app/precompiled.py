@@ -362,6 +362,9 @@ def sanitise_file_contents(
     * adds NOTIFY tag if not present
     """
     try:
+        # [NotifyNL] parsed inside the try: a malformed window from the API then fails the letter as
+        # unable-to-read-the-file (logged as an exception below) instead of the Celery task that called this
+        letter_address_window = parse_letter_address_window(letter_address_window)
         file_data = BytesIO(encoded_string)
 
         page_count = pdf_page_count(file_data)

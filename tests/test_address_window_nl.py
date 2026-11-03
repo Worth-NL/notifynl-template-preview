@@ -26,6 +26,10 @@ def test_parse_letter_address_window_without_a_window(value):
     assert parse_letter_address_window(value) is None
 
 
+def test_parse_letter_address_window_keeps_a_window_that_is_already_built():
+    assert parse_letter_address_window(PINGEN_LETTER_ADDRESS_WINDOW) is PINGEN_LETTER_ADDRESS_WINDOW
+
+
 @pytest.mark.parametrize(
     "value",
     [
@@ -36,6 +40,14 @@ def test_parse_letter_address_window_without_a_window(value):
         {**PINGEN_WINDOW, "address_area": {"x": 22, "y": 60, "width": "wide", "height": 25.5}},
         {**PINGEN_WINDOW, "address_area": {"x": 22, "y": 60, "width": 0, "height": 25.5}},
         {**PINGEN_WINDOW, "address_area": {"x": -1, "y": 60, "width": 85.5, "height": 25.5}},
+        # json.loads reads NaN and Infinity
+        '{"id": "standard-60mm", "address_placement": "60mm", '
+        '"address_area": {"x": 24.6, "y": 60, "width": NaN, "height": 40}}',
+        '{"id": "standard-60mm", "address_placement": "60mm", '
+        '"address_area": {"x": 24.6, "y": 60, "width": 95.4, "height": Infinity}}',
+        # the area has to be on an A4 page
+        {**PINGEN_WINDOW, "address_area": {"x": 22, "y": 280, "width": 85.5, "height": 25.5}, "postage_area": None},
+        {**PINGEN_WINDOW, "address_area": {"x": 150, "y": 60, "width": 85.5, "height": 25.5}, "postage_area": None},
         # the postage area has to contain the address area
         {**PINGEN_WINDOW, "postage_area": {"x": 30, "y": 40, "width": 89.5, "height": 47.5}},
     ],
