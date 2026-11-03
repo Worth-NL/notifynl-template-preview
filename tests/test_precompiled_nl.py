@@ -38,7 +38,7 @@ from app.precompiled import (
     rewrite_address_block,
     standard_letter_address_window,
 )
-from tests.address_window_consts_nl import PINGEN_WINDOW
+from tests.address_window_consts_nl import PINGEN_LETTER_ADDRESS_WINDOW, PINGEN_WINDOW
 from tests.pdf_consts import (
     address_margin,
     bad_postcode,
@@ -473,6 +473,49 @@ def test_overlay_template_pdf_colours_pages_in_red(client, auth_header, mocker):
     )
 
 
+def test_overlay_template_png_for_page_passes_the_letter_address_window_on(client, auth_header, mocker):
+    mocker.patch("app.precompiled.png_from_pdf", return_value=BytesIO(b"\x00"))
+    mock_colour = mocker.patch("app.precompiled._colour_no_print_areas_of_single_page_pdf_in_red")
+
+    response = client.post(
+        url_for(
+            "precompiled_blueprint.overlay_template_png_for_page",
+            page_number="1",
+            letter_address_placement="60mm",
+            letter_address_window=json.dumps(PINGEN_WINDOW),
+        ),
+        data=b"1234",
+        headers={"Content-type": "application/json", **auth_header},
+    )
+
+    assert response.status_code == 200
+    mock_colour.assert_called_once_with(
+        ANY, is_first_page=True, letter_address_placement="60mm", letter_address_window=PINGEN_LETTER_ADDRESS_WINDOW
+    )
+
+
+def test_overlay_template_pdf_passes_the_letter_address_window_on(client, auth_header, mocker):
+    mock_colour = mocker.patch("app.precompiled._colour_no_print_areas_of_page_in_red")
+
+    response = client.post(
+        url_for(
+            "precompiled_blueprint.overlay_template_pdf",
+            letter_address_placement="60mm",
+            letter_address_window=json.dumps(PINGEN_WINDOW),
+        ),
+        data=multi_page_pdf,
+        headers=auth_header,
+    )
+
+    assert response.status_code == 200
+    assert mock_colour.call_args_list[0] == call(
+        ANY, is_first_page=True, letter_address_placement="60mm", letter_address_window=PINGEN_LETTER_ADDRESS_WINDOW
+    )
+    assert all(
+        called.kwargs["letter_address_window"] == PINGEN_LETTER_ADDRESS_WINDOW for called in mock_colour.call_args_list
+    )
+
+
 def test_precompiled_sanitise_pdf_with_colour_in_address_margin_returns_400(client, auth_header, mocker):
     # fixture's address block is laid out at the 50mm position
     response = client.post(
@@ -766,6 +809,61 @@ def test_sanitise_with_a_postage_area_rejects_anything_else_inside_it(client, au
     assert response.status_code == 400
     assert response.json["message"] == "content-outside-printable-area"
     assert response.json["invalid_pages"] == [1]
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        # right of the postage area, where a "Kenmerk / Datum" column goes
+        (130, 60, "Kenmerk"),
+        # between the postage area and the old service address column at 125mm
+        (111, 70, "Datum"),
+        # left of the postage area, inside the border
+        (8, 60, "A1"),
+        # between the postage area and the old body top at 95mm
+        (25, 92, "Onderwerp"),
+    ],
+)
+def test_sanitise_with_a_postage_area_allows_content_outside_it(client, auth_header, line):
+    response = _sanitise_with_window(
+        client, auth_header, _embedded_font_letter(*WORTH_ADDRESS_LINES, line), PINGEN_WINDOW
+    )
+
+    assert response.status_code == 200, response.json
+
+
+def _letter_with_rectangles(*rectangles):
+    """A one-page letter with black rectangles, each (left, top, right, bottom) in mm from the top left."""
+    buffer = BytesIO()
+    letter = canvas.Canvas(buffer, pagesize=A4)
+    for left, top, right, bottom in rectangles:
+        letter.rect(left * mm, A4[1] - bottom * mm, (right - left) * mm, (bottom - top) * mm, fill=1, stroke=0)
+    letter.save()
+    return BytesIO(buffer.getvalue())
+
+
+@pytest.mark.parametrize(
+    "past_the_edge, expected_message",
+    [
+        (0, ""),
+        # anti-aliasing gets no extra margin: Pingen checks its address area exactly
+        (0.3, "content-outside-printable-area"),
+    ],
+)
+def test_postage_area_check_is_exact_at_the_address_areas_edges(client, past_the_edge, expected_message):
+    # Pingen's address area is 22-107.5mm from the left and 60-85.5mm from the top
+    letter = _letter_with_rectangles(
+        (30, 60 - past_the_edge, 60, 65),
+        (30, 80, 60, 85.5 + past_the_edge),
+        (22 - past_the_edge, 65, 40, 70),
+        (90, 65, 107.5 + past_the_edge, 70),
+    )
+
+    message, _ = get_invalid_pages_with_message(
+        letter, letter_address_window=parse_letter_address_window(PINGEN_WINDOW)
+    )
+
+    assert message == expected_message
 
 
 def test_sanitise_without_a_postage_area_allows_a_logo_above_the_address(client, auth_header):
