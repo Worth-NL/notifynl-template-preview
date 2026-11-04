@@ -25,7 +25,12 @@ from app.weasyprint_hack import WeasyprintError
 
 @notify_celery.task(name="sanitise-and-upload-letter", bind=True)
 def sanitise_and_upload_letter(
-    self: Task, notification_id, filename, allow_international_letters=False, letter_address_placement=None
+    self: Task,
+    notification_id,
+    filename,
+    allow_international_letters=False,
+    letter_address_placement=None,
+    letter_address_window=None,
 ):
     current_app.logger.info(
         "Sanitising notification with id %s", notification_id, extra={"notification_id": notification_id}
@@ -38,6 +43,7 @@ def sanitise_and_upload_letter(
             allow_international_letters=allow_international_letters,
             filename=filename,
             letter_address_placement=letter_address_placement or DEFAULT_LETTER_ADDRESS_PLACEMENT,
+            letter_address_window=letter_address_window,
         )
 
         # Only files that have failed sanitisation have 'message' in the sanitisation_details dict
@@ -99,7 +105,11 @@ def sanitise_and_upload_letter(
 
 @notify_celery.task(name=TaskNamesNL.SANITISE_AND_MERGE_LETTER_PARTS)
 def sanitise_and_merge_letter_parts(
-    notification_id, filenames, allow_international_letters=False, letter_address_placement=None
+    notification_id,
+    filenames,
+    allow_international_letters=False,
+    letter_address_placement=None,
+    letter_address_window=None,
 ):
     """
     Precompiled letters submitted as multiple PDFs (up to 3), to be merged into a single
@@ -129,6 +139,7 @@ def sanitise_and_merge_letter_parts(
                 filename=filename,
                 is_an_attachment=part_index > 0,
                 letter_address_placement=letter_address_placement or DEFAULT_LETTER_ADDRESS_PLACEMENT,
+                letter_address_window=letter_address_window,
             )
 
             if sanitisation_details.get("message"):
@@ -433,7 +444,11 @@ def _remove_folder_from_filename(filename):
 
 @notify_celery.task(name="recreate-pdf-for-precompiled-letter")
 def recreate_pdf_for_precompiled_letter(
-    notification_id, file_location, allow_international_letters, letter_address_placement=None
+    notification_id,
+    file_location,
+    allow_international_letters,
+    letter_address_placement=None,
+    letter_address_window=None,
 ):
     """
     This task takes the details of a PDF letter which we want to recreate as its arguments.
@@ -458,6 +473,7 @@ def recreate_pdf_for_precompiled_letter(
             allow_international_letters=allow_international_letters,
             filename=file_location,
             letter_address_placement=letter_address_placement or DEFAULT_LETTER_ADDRESS_PLACEMENT,
+            letter_address_window=letter_address_window,
         )
 
         # Only files that have failed sanitisation have 'message' in the sanitisation_details dict

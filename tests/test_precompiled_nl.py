@@ -1,5 +1,6 @@
 import base64
 import io
+import json
 import unicodedata
 import uuid
 from io import BytesIO
@@ -8,24 +9,36 @@ from unittest.mock import ANY, MagicMock, call
 import pymupdf
 import pytest
 from flask import url_for
+from pypdf import PdfReader
 from reportlab.lib.colors import black, white
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
 
 from app import ValidationFailed
+from app.address_window_nl import parse_letter_address_window
 from app.precompiled import (
     ADDRESS_LEFT_FROM_LEFT_OF_PAGE,
     DEFAULT_LETTER_ADDRESS_PLACEMENT,
+    FONT,
     NOTIFY_TAG_BOUNDING_BOX,
+    TRUE_TYPE_FONT_FILE,
+    NotifyCanvas,
+    _colour_no_print_areas_of_page_in_red,
+    _colour_no_print_areas_of_single_page_pdf_in_red,
     _other_letter_address_placement,
+    _overlay_printable_areas_with_white,
     add_notify_tag_to_letter,
     check_notify_tag_area_for_encroachment,
     extract_address_block,
     get_invalid_pages_with_message,
     is_notify_tag_present,
     rewrite_address_block,
+    standard_letter_address_window,
 )
+from tests.address_window_consts_nl import PINGEN_LETTER_ADDRESS_WINDOW, PINGEN_WINDOW
 from tests.pdf_consts import (
     address_margin,
     bad_postcode,
@@ -81,7 +94,7 @@ def test_rewrite_address_block_does_not_retry_when_primary_extraction_succeeds(m
         letter_address_placement="50mm",
     )
 
-    mock_extract.assert_called_once_with(pdf, letter_address_placement="50mm")
+    mock_extract.assert_called_once_with(pdf, letter_address_window=standard_letter_address_window("50mm"))
 
 
 def test_rewrite_address_block_does_not_retry_for_a_non_candidate_error_code(mocker):
@@ -100,7 +113,7 @@ def test_rewrite_address_block_does_not_retry_for_a_non_candidate_error_code(moc
         )
 
     assert error.value.message == "too-many-address-lines"
-    mock_extract.assert_called_once_with(pdf, letter_address_placement="50mm")
+    mock_extract.assert_called_once_with(pdf, letter_address_window=standard_letter_address_window("50mm"))
 
 
 @pytest.mark.parametrize("candidate_error_code", ("not-enough-address-lines", "address-is-empty"))
@@ -421,7 +434,10 @@ def test_overlay_template_png_for_page_checks_if_first_page(client, auth_header,
 
     assert response.status_code == 200
     mock_colour.assert_called_once_with(
-        ANY, is_first_page=expected_first_page, letter_address_placement=DEFAULT_LETTER_ADDRESS_PLACEMENT
+        ANY,
+        is_first_page=expected_first_page,
+        letter_address_placement=DEFAULT_LETTER_ADDRESS_PLACEMENT,
+        letter_address_window=None,
     )
     mock_png_from_pdf.assert_called_once_with(mock_colour.return_value, page_number=1)
 
@@ -437,8 +453,66 @@ def test_overlay_template_pdf_colours_pages_in_red(client, auth_header, mocker):
 
     assert (
         mock_colour.call_args_list
-        == [call(ANY, is_first_page=True, letter_address_placement=DEFAULT_LETTER_ADDRESS_PLACEMENT)]
-        + [call(ANY, is_first_page=False, letter_address_placement=DEFAULT_LETTER_ADDRESS_PLACEMENT)] * 9
+        == [
+            call(
+                ANY,
+                is_first_page=True,
+                letter_address_placement=DEFAULT_LETTER_ADDRESS_PLACEMENT,
+                letter_address_window=None,
+            )
+        ]
+        + [
+            call(
+                ANY,
+                is_first_page=False,
+                letter_address_placement=DEFAULT_LETTER_ADDRESS_PLACEMENT,
+                letter_address_window=None,
+            )
+        ]
+        * 9
+    )
+
+
+def test_overlay_template_png_for_page_passes_the_letter_address_window_on(client, auth_header, mocker):
+    mocker.patch("app.precompiled.png_from_pdf", return_value=BytesIO(b"\x00"))
+    mock_colour = mocker.patch("app.precompiled._colour_no_print_areas_of_single_page_pdf_in_red")
+
+    response = client.post(
+        url_for(
+            "precompiled_blueprint.overlay_template_png_for_page",
+            page_number="1",
+            letter_address_placement="60mm",
+            letter_address_window=json.dumps(PINGEN_WINDOW),
+        ),
+        data=b"1234",
+        headers={"Content-type": "application/json", **auth_header},
+    )
+
+    assert response.status_code == 200
+    mock_colour.assert_called_once_with(
+        ANY, is_first_page=True, letter_address_placement="60mm", letter_address_window=PINGEN_LETTER_ADDRESS_WINDOW
+    )
+
+
+def test_overlay_template_pdf_passes_the_letter_address_window_on(client, auth_header, mocker):
+    mock_colour = mocker.patch("app.precompiled._colour_no_print_areas_of_page_in_red")
+
+    response = client.post(
+        url_for(
+            "precompiled_blueprint.overlay_template_pdf",
+            letter_address_placement="60mm",
+            letter_address_window=json.dumps(PINGEN_WINDOW),
+        ),
+        data=multi_page_pdf,
+        headers=auth_header,
+    )
+
+    assert response.status_code == 200
+    assert mock_colour.call_args_list[0] == call(
+        ANY, is_first_page=True, letter_address_placement="60mm", letter_address_window=PINGEN_LETTER_ADDRESS_WINDOW
+    )
+    assert all(
+        called.kwargs["letter_address_window"] == PINGEN_LETTER_ADDRESS_WINDOW for called in mock_colour.call_args_list
     )
 
 
@@ -634,3 +708,191 @@ def test_extract_address_block_when_address_paragraphs_do_not_match_visual_order
     )
 
     assert address.raw_address == "\n".join(["County", "My User", "SW1 1AA", "42 The Parkway", "City"])
+
+
+def _embedded_font_letter(*lines):
+    """A one-page letter in the embedded Arial only. Each line is (x mm, baseline y mm from the top, text)."""
+    if FONT not in pdfmetrics.getRegisteredFontNames():
+        pdfmetrics.registerFont(TTFont(FONT, TRUE_TYPE_FONT_FILE))
+    buffer = BytesIO()
+    letter = canvas.Canvas(buffer, pagesize=A4, initialFontName=FONT, initialFontSize=10)
+    for x, y, text in lines:
+        letter.drawString(x * mm, A4[1] - y * mm, text)
+    letter.save()
+    return buffer.getvalue()
+
+
+def _unembedded_fonts(pdf):
+    return [font[3] for page in pymupdf.open("pdf", pdf) for font in page.get_fonts() if font[1] == "n/a"]
+
+
+def test_add_notify_tag_to_letter_adds_no_unembedded_font(client):
+    letter = _embedded_font_letter((25, 64, "Worth"))
+
+    tagged = add_notify_tag_to_letter(BytesIO(letter)).getvalue()
+
+    assert is_notify_tag_present(BytesIO(tagged))
+    assert _unembedded_fonts(tagged) == []
+
+
+def test_overlays_add_no_unembedded_font(client):
+    letter = _embedded_font_letter((25, 64, "Worth"))
+
+    whited = _overlay_printable_areas_with_white(BytesIO(letter)).getvalue()
+    reddened = _colour_no_print_areas_of_single_page_pdf_in_red(BytesIO(letter), is_first_page=True).getvalue()
+
+    assert _unembedded_fonts(whited) == []
+    assert _unembedded_fonts(reddened) == []
+
+
+WORTH_ADDRESS_LINES = ((25, 64, "Worth"), (25, 68.5, "Laan van Vredenoord 11"), (25, 73, "2289 DA Rijswijk"))
+BODY_LINE = (25, 110, "Dit is een automatische brief.")
+STANDARD_60MM_WINDOW = {
+    "id": "standard-60mm",
+    "address_placement": "60mm",
+    "address_area": {"x": 24.6, "y": 60, "width": 95.4, "height": 40},
+}
+
+
+def _sanitise_with_window(client, auth_header, pdf, letter_address_window):
+    return client.post(
+        url_for(
+            "precompiled_blueprint.sanitise_precompiled_letter",
+            letter_address_placement="60mm",
+            letter_address_window=json.dumps(letter_address_window),
+        ),
+        data=pdf,
+        headers={"Content-type": "application/json", **auth_header},
+    )
+
+
+def test_sanitise_with_a_postage_area_accepts_an_address_inside_its_address_area(client, auth_header):
+    response = _sanitise_with_window(
+        client, auth_header, _embedded_font_letter(*WORTH_ADDRESS_LINES, BODY_LINE), PINGEN_WINDOW
+    )
+
+    assert response.status_code == 200, response.json
+    assert response.json["recipient_address"] == "Worth\nLaan van Vredenoord 11\n2289 DA  RIJSWIJK"
+
+
+@pytest.mark.parametrize(
+    "letter_address_window, expected_status, expected_message",
+    [
+        # Pingen's address area ends at 85.5mm, this fixture's address sits at 88.5-100.3mm
+        (PINGEN_WINDOW, 400, "address-placement-mismatch"),
+        (STANDARD_60MM_WINDOW, 200, None),
+    ],
+)
+def test_sanitise_checks_the_address_against_the_windows_address_area(
+    client, auth_header, letter_address_window, expected_status, expected_message
+):
+    response = _sanitise_with_window(client, auth_header, address_60mm_no_retouradres, letter_address_window)
+
+    assert response.status_code == expected_status
+    assert response.json["message"] == expected_message
+
+
+@pytest.mark.parametrize(
+    "lines",
+    [
+        # a logo or other content above the address, inside the postage area
+        (*WORTH_ADDRESS_LINES, (25, 45, "Logo")),
+        # content just below the address area, still inside the postage area
+        (*WORTH_ADDRESS_LINES, (25, 86.8, "Datum")),
+        # an address line running past the address area's right edge
+        (*WORTH_ADDRESS_LINES[:2], (25, 73, "2289 DA Rijswijk, een regel die tot voorbij het adresvenster loopt")),
+    ],
+)
+def test_sanitise_with_a_postage_area_rejects_anything_else_inside_it(client, auth_header, lines):
+    response = _sanitise_with_window(client, auth_header, _embedded_font_letter(*lines), PINGEN_WINDOW)
+
+    assert response.status_code == 400
+    assert response.json["message"] == "content-outside-printable-area"
+    assert response.json["invalid_pages"] == [1]
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        # right of the postage area, where a "Kenmerk / Datum" column goes
+        (130, 60, "Kenmerk"),
+        # between the postage area and the old service address column at 125mm
+        (111, 70, "Datum"),
+        # left of the postage area, inside the border
+        (8, 60, "A1"),
+        # between the postage area and the old body top at 95mm
+        (25, 92, "Onderwerp"),
+    ],
+)
+def test_sanitise_with_a_postage_area_allows_content_outside_it(client, auth_header, line):
+    response = _sanitise_with_window(
+        client, auth_header, _embedded_font_letter(*WORTH_ADDRESS_LINES, line), PINGEN_WINDOW
+    )
+
+    assert response.status_code == 200, response.json
+
+
+def _letter_with_rectangles(*rectangles):
+    """A one-page letter with black rectangles, each (left, top, right, bottom) in mm from the top left."""
+    buffer = BytesIO()
+    letter = canvas.Canvas(buffer, pagesize=A4)
+    for left, top, right, bottom in rectangles:
+        letter.rect(left * mm, A4[1] - bottom * mm, (right - left) * mm, (bottom - top) * mm, fill=1, stroke=0)
+    letter.save()
+    return BytesIO(buffer.getvalue())
+
+
+@pytest.mark.parametrize(
+    "past_the_edge, expected_message",
+    [
+        (0, ""),
+        # anti-aliasing gets no extra margin: Pingen checks its address area exactly
+        (0.3, "content-outside-printable-area"),
+    ],
+)
+def test_postage_area_check_is_exact_at_the_address_areas_edges(client, past_the_edge, expected_message):
+    # Pingen's address area is 22-107.5mm from the left and 60-85.5mm from the top
+    letter = _letter_with_rectangles(
+        (30, 60 - past_the_edge, 60, 65),
+        (30, 80, 60, 85.5 + past_the_edge),
+        (22 - past_the_edge, 65, 40, 70),
+        (90, 65, 107.5 + past_the_edge, 70),
+    )
+
+    message, _ = get_invalid_pages_with_message(
+        letter, letter_address_window=parse_letter_address_window(PINGEN_WINDOW)
+    )
+
+    assert message == expected_message
+
+
+def test_sanitise_without_a_postage_area_allows_a_logo_above_the_address(client, auth_header):
+    response = _sanitise_with_window(
+        client, auth_header, _embedded_font_letter(*WORTH_ADDRESS_LINES, (25, 45, "Logo")), STANDARD_60MM_WINDOW
+    )
+
+    assert response.status_code == 200, response.json
+
+
+def test_sanitise_with_a_malformed_letter_address_window_returns_400(client, auth_header):
+    response = _sanitise_with_window(client, auth_header, address_60mm_no_retouradres, {"id": "pingen"})
+
+    assert response.status_code == 400
+    assert "letter_address_window" in response.json["message"]
+
+
+def test_red_overlay_with_a_postage_area_marks_the_postage_area_around_the_address(client, mocker):
+    rect = mocker.spy(NotifyCanvas, "rect")
+    page = PdfReader(BytesIO(_embedded_font_letter(*WORTH_ADDRESS_LINES))).pages[0]
+
+    _colour_no_print_areas_of_page_in_red(
+        page, is_first_page=True, letter_address_window=parse_letter_address_window(PINGEN_WINDOW)
+    )
+
+    # after the four page margins
+    assert [called.args[1:] for called in rect.call_args_list[4:]] == [
+        ((20, 40), (109.5, 60)),
+        ((20, 85.5), (109.5, 87.5)),
+        ((20, 60), (22, 85.5)),
+        ((107.5, 60), (109.5, 85.5)),
+    ]
