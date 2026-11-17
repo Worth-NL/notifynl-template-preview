@@ -61,7 +61,6 @@ def test_precompiled_pdf_defaults_first_page_when_no_request_args(
     assert mocked_png_from_pdf.call_args[1]["page_number"] == 1
 
 
-@pytest.mark.skip(reason="[NOTIFYNL] AWS permissions break test.")
 def test_precompiled_pdf_caches_png_to_s3(
     app,
     client,
@@ -93,8 +92,8 @@ def test_precompiled_pdf_caches_png_to_s3(
 @pytest.mark.parametrize(
     "pdf_file, expected_cache_key",
     (
-        (valid_letter, "pngs/60152acab0bd269d382658c52306030eb0716f35.png"),
-        (blank_with_address, "pngs/fcb425959a33f1447079125de5dd8685b1a67929.png"),
+        (valid_letter, "pngs/a05cba9753a790829240e6ed667b2e73ae29e3ab.png"),
+        (blank_with_address, "pngs/9d5a4cc2ca568c227a550d1a73931afe8ff81d5a.png"),
     ),
     ids=[
         "valid_letter",
@@ -146,11 +145,11 @@ def test_precompiled_pdf_caches_entire_contents_of_page(
 
     data_to_be_hashed = mock_sha1.call_args_list[0][0][0]
 
-    assert data_to_be_hashed.startswith(b"JVBERi0xL")
+    assert data_to_be_hashed.startswith(b"b'\\x80\\x04")  # Some pickled PDF
     assert data_to_be_hashed.endswith(b"False")  # The hide_notify argument
 
     assert len(valid_letter) == 23_218
-    assert len(data_to_be_hashed) > len(valid_letter)  # Hashed data should still be larger
+    assert len(data_to_be_hashed) > len(valid_letter)  # Pickled PDF should take up more space
 
 
 @pytest.mark.parametrize(

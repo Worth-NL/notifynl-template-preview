@@ -1,3 +1,4 @@
+import logging
 import os
 from collections.abc import Callable
 from contextlib import suppress
@@ -10,7 +11,6 @@ from gds_metrics import GDSMetrics
 from notifications_utils import request_helper
 from notifications_utils.celery import NotifyCelery
 from notifications_utils.clients.signing.signing_client import Signing
-from notifications_utils.clients.statsd.statsd_client import StatsdClient
 from notifications_utils.logging import flask as utils_logging
 from notifications_utils.s3 import S3ObjectNotFound, s3upload
 
@@ -19,6 +19,17 @@ from app.utils import caching_s3download
 
 notify_celery = NotifyCelery()
 metrics = GDSMetrics()
+
+
+def configure_global_logging(app):
+    root_logger = logging.getLogger()
+
+    for handler in list(app.logger.handlers):
+        if handler not in root_logger.handlers:
+            root_logger.addHandler(handler)
+        app.logger.removeHandler(handler)
+
+    root_logger.setLevel(logging.WARNING)
 
 
 def create_app():
@@ -45,11 +56,10 @@ def create_app():
     application.register_blueprint(preview_blueprint)
     application.register_blueprint(precompiled_blueprint)
 
-    application.statsd_client = StatsdClient()
-    application.statsd_client.init_app(application)
     application.signing_client = Signing()
     application.signing_client.init_app(application)
-    utils_logging.init_app(application, application.statsd_client)
+    utils_logging.init_app(application)
+    configure_global_logging(application)
     weasyprint_hack.init_app(application)
     request_helper.init_app(application)
     notify_celery.init_app(application)

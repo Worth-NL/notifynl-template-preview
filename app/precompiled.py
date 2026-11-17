@@ -5,7 +5,7 @@ from io import BytesIO
 from itertools import groupby
 from operator import itemgetter
 
-import fitz
+import pymupdf
 import sentry_sdk
 from flask import Blueprint, current_app, jsonify, request, send_file
 from notifications_utils.pdf import is_letter_too_long, pdf_page_count
@@ -21,6 +21,7 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
 
 from app import InvalidRequest, ValidationFailed, auth
+from app.address_window_nl import Area, LetterAddressWindow, parse_letter_address_window
 from app.embedded_fonts import contains_unembedded_fonts, embed_fonts
 from app.preview import png_from_pdf
 from app.transformation import (
@@ -40,7 +41,7 @@ NOTIFY_TAG_BOUNDING_BOX_HEIGHT = 6.149
 NOTIFY_TAG_FONT_SIZE = 6
 NOTIFY_TAG_LINE_HEIGHT = NOTIFY_TAG_FONT_SIZE * PT_TO_MM
 NOTIFY_TAG_TEXT = "NOTIFY"
-NOTIFY_TAG_BOUNDING_BOX = fitz.Rect(
+NOTIFY_TAG_BOUNDING_BOX = pymupdf.Rect(
     # add on a margin to ensure we capture all text
     0,  # x1
     0,  # y1
@@ -121,7 +122,7 @@ def address_bottom_from_top_of_page(letter_address_placement):
 def address_bounding_box(letter_address_placement):
     top = address_top_from_top_of_page(letter_address_placement)
     bottom = address_bottom_from_top_of_page(letter_address_placement)
-    return fitz.Rect(
+    return pymupdf.Rect(
         # add on a margin to ensure we capture all text
         (ADDRESS_LEFT_FROM_LEFT_OF_PAGE - 3) * mm,  # x1
         (top - 3) * mm,  # y1
@@ -133,18 +134,18 @@ def address_bounding_box(letter_address_placement):
 LOGO_LEFT_FROM_LEFT_OF_PAGE = BORDER_LEFT_FROM_LEFT_OF_PAGE
 LOGO_RIGHT_FROM_LEFT_OF_PAGE = SERVICE_ADDRESS_LEFT_FROM_LEFT_OF_PAGE
 LOGO_TOP_FROM_TOP_OF_PAGE = BORDER_TOP_FROM_TOP_OF_PAGE
-# [NOTIFYNL] must equal address_top_from_top_of_page(letter_address_placement) so the logo
+# [NOTIFYNL] must equal the top of the address window so the logo
 # overlay meets the address overlay with no gap between them (see
 # _overlay_printable_areas_with_white's docstring: "Logo is the area above the address area").
 # Left at 40 (< ADDRESS_TOP=50) between the 2025-10-02 margin change and now, which left an
 # uncovered strip between the two overlays.
 
 
-def logo_bottom_from_top_of_page(letter_address_placement):
-    return address_top_from_top_of_page(letter_address_placement)
+def logo_bottom_from_top_of_page(letter_address_window):
+    return letter_address_window.address_area.y
 
 
-# [NOTIFYNL] must be no later than address_bottom_from_top_of_page(letter_address_placement), so
+# [NOTIFYNL] must be no later than the bottom of the address window, so
 # the address overlay meets the body overlay with no gap - mirrors logo_bottom_from_top_of_page's
 # fix for the equivalent gap above the address block. Deliberately a NEW function rather than
 # renaming BODY_TOP_FROM_TOP_OF_PAGE itself: SERVICE_ADDRESS_BOTTOM_FROM_TOP_OF_PAGE aliases that
@@ -154,8 +155,47 @@ def logo_bottom_from_top_of_page(letter_address_placement):
 # window). For "50mm" (address_bottom=90mm) it pulls body_top down to 90mm, closing the gap that
 # let "Datum"/"Onderwerp" text sitting just below a 50mm-placed address window go un-whited-out
 # and get wrongly flagged content-outside-printable-area (Den Haag SZW letter, 2026-08-31).
-def body_top_from_top_of_page(letter_address_placement):
-    return min(BODY_TOP_FROM_TOP_OF_PAGE, address_bottom_from_top_of_page(letter_address_placement))
+def body_top_from_top_of_page(letter_address_window):
+    return min(BODY_TOP_FROM_TOP_OF_PAGE, letter_address_window.address_area.bottom)
+
+
+# [NotifyNL] The first page's geometry comes from a LetterAddressWindow (app/address_window_nl.py) that notifynl-api
+# sends. These give the window template-preview always used for a placement, for callers that send none.
+# notifynl-api's LETTER_ADDRESS_WINDOWS repeats the standard windows' numbers, and its copy is the one that applies to
+# every letter it sends: change both together.
+def standard_letter_address_window(letter_address_placement):
+    if letter_address_placement not in ADDRESS_TOP_FROM_TOP_OF_PAGE_BY_PLACEMENT:
+        letter_address_placement = DEFAULT_LETTER_ADDRESS_PLACEMENT
+    return LetterAddressWindow(
+        id=f"standard-{letter_address_placement}",
+        address_placement=letter_address_placement,
+        address_area=Area(
+            x=ADDRESS_LEFT_FROM_LEFT_OF_PAGE,
+            y=address_top_from_top_of_page(letter_address_placement),
+            width=ADDRESS_RIGHT_FROM_LEFT_OF_PAGE - ADDRESS_LEFT_FROM_LEFT_OF_PAGE,
+            height=ADDRESS_WINDOW_HEIGHT,
+        ),
+    )
+
+
+def _letter_address_window(letter_address_window, letter_address_placement):
+    return letter_address_window or standard_letter_address_window(letter_address_placement)
+
+
+def _address_bounding_box_of(letter_address_window):
+    area = letter_address_window.address_area
+    # a print provider's own window (one with a postage area) is exact; the others get a margin to capture all text
+    margin = 0 if letter_address_window.postage_area else 3
+    return pymupdf.Rect(
+        (area.x - margin) * mm, (area.y - margin) * mm, (area.right + margin) * mm, (area.bottom + margin) * mm
+    )
+
+
+def _placement_mismatch_candidate_windows(letter_address_window):
+    """Where else a letter's address may sit: the other placement's window, or both for a print provider's own."""
+    if letter_address_window.postage_area:
+        return [standard_letter_address_window(placement) for placement in ADDRESS_TOP_FROM_TOP_OF_PAGE_BY_PLACEMENT]
+    return [standard_letter_address_window(_other_letter_address_placement(letter_address_window.address_placement))]
 
 
 A4_HEIGHT_IN_PTS = A4_HEIGHT * mm
@@ -169,7 +209,11 @@ precompiled_blueprint = Blueprint("precompiled_blueprint", __name__)
 class NotifyCanvas(canvas.Canvas):
     def __init__(self, colour):
         self.packet = BytesIO()
-        super().__init__(self.packet, pagesize=A4)
+        # [NotifyNL] start with the embedded Arial: reportlab's default Helvetica ends up in every overlay and NOTIFY
+        # tag as an unembedded font, after the letter's own fonts were embedded, and print providers (Pingen) flag it
+        if FONT not in pdfmetrics.getRegisteredFontNames():
+            pdfmetrics.registerFont(TTFont(FONT, TRUE_TYPE_FONT_FILE))
+        super().__init__(self.packet, pagesize=A4, initialFontName=FONT)
 
         self.setStrokeColor(colour)
         self.setFillColor(colour)
@@ -254,6 +298,7 @@ def sanitise_precompiled_letter():
         filename=request.args.get("upload_id"),
         is_an_attachment=is_an_attachment,
         letter_address_placement=request.args.get("letter_address_placement") or DEFAULT_LETTER_ADDRESS_PLACEMENT,
+        letter_address_window=parse_letter_address_window(request.args.get("letter_address_window")),
     )
     status_code = 400 if sanitise_json.get("message") else 200
 
@@ -309,6 +354,7 @@ def sanitise_file_contents(
     filename,
     is_an_attachment=False,
     letter_address_placement=DEFAULT_LETTER_ADDRESS_PLACEMENT,
+    letter_address_window=None,
 ):
     """
     Given a PDF, returns a new PDF that has been sanitised and dvla approved 👍
@@ -318,6 +364,9 @@ def sanitise_file_contents(
     * adds NOTIFY tag if not present
     """
     try:
+        # [NotifyNL] parsed inside the try: a malformed window from the API then fails the letter as
+        # unable-to-read-the-file (logged as an exception below) instead of the Celery task that called this
+        letter_address_window = parse_letter_address_window(letter_address_window)
         file_data = BytesIO(encoded_string)
 
         page_count = pdf_page_count(file_data)
@@ -326,7 +375,10 @@ def sanitise_file_contents(
             raise ValidationFailed(message, page_count=page_count)
 
         message, invalid_pages = get_invalid_pages_with_message(
-            file_data, is_an_attachment=is_an_attachment, letter_address_placement=letter_address_placement
+            file_data,
+            is_an_attachment=is_an_attachment,
+            letter_address_placement=letter_address_placement,
+            letter_address_window=letter_address_window,
         )
         if message:
             raise ValidationFailed(message, invalid_pages, page_count=page_count)
@@ -341,7 +393,23 @@ def sanitise_file_contents(
                 allow_international_letters=allow_international_letters,
                 filename=filename,
                 letter_address_placement=letter_address_placement,
+                letter_address_window=letter_address_window,
             )
+
+            # Check if there are encroaching invisible/hidden characters on the Notify tag area and log the event.
+            # The strategy is to simply log incidents of invisible/hidden text/characters encroaching on the Notify tag
+            # area for now in order to monitor and fine tune the algorithm.
+            # The first character of the encroaching text will be logged to avoid PII issues and to aid the evaluation
+            # of the checks, ie "text" would be logged as "t" and "   " as " ".
+            encroaching_text = check_notify_tag_area_for_encroachment(file_data)
+            if encroaching_text:
+                encroaching_character = repr(encroaching_text[0])  # handles displaying invisible characters in the logs
+                current_app.logger.warning(
+                    "precompiled pdf:(%s) has character:(%s), encroaching on the Notify tag area.",
+                    filename,
+                    encroaching_character,
+                    extra={"file_name": filename, "encroaching_character": encroaching_character},
+                )
 
         raw_file = file_data.read()
 
@@ -389,7 +457,15 @@ def sanitise_file_contents(
         }
 
 
-def rewrite_pdf(file_data, *, page_count, allow_international_letters, filename, letter_address_placement):
+def rewrite_pdf(
+    file_data,
+    *,
+    page_count,
+    allow_international_letters,
+    filename,
+    letter_address_placement,
+    letter_address_window=None,
+):
     log_metadata_for_letter(file_data, filename)
 
     file_data, recipient_address = rewrite_address_block(
@@ -398,6 +474,7 @@ def rewrite_pdf(file_data, *, page_count, allow_international_letters, filename,
         allow_international_letters=allow_international_letters,
         filename=filename,
         letter_address_placement=letter_address_placement,
+        letter_address_window=letter_address_window,
     )
 
     file_data = normalise_fonts_and_colours(file_data, filename)
@@ -461,11 +538,15 @@ def overlay_template_png_for_page():
         raise InvalidRequest(f"page_number or is_first_page must be specified in request params {request.args}")
 
     letter_address_placement = request.args.get("letter_address_placement") or DEFAULT_LETTER_ADDRESS_PLACEMENT
+    letter_address_window = parse_letter_address_window(request.args.get("letter_address_window"))
 
     return send_file(
         path_or_file=png_from_pdf(
             _colour_no_print_areas_of_single_page_pdf_in_red(
-                file_data, is_first_page=is_first_page, letter_address_placement=letter_address_placement
+                file_data,
+                is_first_page=is_first_page,
+                letter_address_placement=letter_address_placement,
+                letter_address_window=letter_address_window,
             ),
             # the pdf is only one page, so this is always 1.
             page_number=1,
@@ -480,25 +561,29 @@ def overlay_template_pdf():
     """
     The api app calls this with a PDF as the POST body, expecting to receive a PDF back with the red overlay applied.
 
-    This endpoint will raise an error if you include any query param other than letter_address_placement, because it
-    assumes any other arg means you meant to ask for a png instead.
+    This endpoint will raise an error if you include any query param other than letter_address_placement and
+    letter_address_window, because it assumes any other arg means you meant to ask for a png instead.
     """
     encoded_string = request.get_data()
 
     if not encoded_string:
         raise InvalidRequest("no data received in POST")
 
-    unexpected_args = set(request.args) - {"letter_address_placement"}
+    unexpected_args = set(request.args) - {"letter_address_placement", "letter_address_window"}
     if unexpected_args:
         raise InvalidRequest(f"Did not expect any args but received {request.args}. Did you mean to call overlay.png?")
 
     letter_address_placement = request.args.get("letter_address_placement") or DEFAULT_LETTER_ADDRESS_PLACEMENT
+    letter_address_window = parse_letter_address_window(request.args.get("letter_address_window"))
 
     pdf = PdfReader(BytesIO(encoded_string))
 
     for i in range(len(pdf.pages)):
         _colour_no_print_areas_of_page_in_red(
-            pdf.pages[i], is_first_page=(i == 0), letter_address_placement=letter_address_placement
+            pdf.pages[i],
+            is_first_page=(i == 0),
+            letter_address_placement=letter_address_placement,
+            letter_address_window=letter_address_window,
         )
 
     return send_file(path_or_file=bytesio_from_pdf(pdf), mimetype="application/pdf")
@@ -528,6 +613,88 @@ def log_metadata_for_letter(src_pdf, filename):
         )
 
 
+def _no_intersect_with_notify_tag_bbox(bbox):
+    """
+    Returns True if a bbox does not intersect with the scanned area which is the NOTIFY_TAG_BOUNDING_BOX.
+    There have been instances where a letter was rejected by DVLA when an invisible character was found well outside the
+    NOTIFY_TAG_BOUNDING_BOX but to the right of the NOTIFY_TAG_BOUNDING_BOX. Attempts to expand the area to the right
+    have caused issues, because there are valid PDFs (not rejected by DVLA) that have white spaces at the extreme top
+    right of the page as a by presumably an artifact of their construction.
+    This solution is limited to encroachment into the NOTIFY_TAG_BOUNDING_BOX.
+    Any future incidents of invisible text outside the  NOTIFY_TAG_BOUNDING_BOX causing problems can be addressed then.
+    There is defensive code to check for the areas to the left and above the NOTIFY_TAG_BOUNDING_BOX to catch any
+    intrusions because even though the bounding box should technically starts at 0,0, in reality there are offsets.
+    The comparison excludes bboxes that touch the boundary of the scanned area but don't overlap.
+    """
+
+    t_x0 = NOTIFY_TAG_BOUNDING_BOX.x0
+    t_y0 = NOTIFY_TAG_BOUNDING_BOX.y0
+    t_x1 = NOTIFY_TAG_BOUNDING_BOX.x1
+    t_y1 = NOTIFY_TAG_BOUNDING_BOX.y1
+
+    return (
+        bbox[2] <= t_x0  # either touching or completely to the left
+        or bbox[3] <= t_y0  # either touching or completely above
+        or bbox[0] >= t_x1  # either touching or completely to the right
+        or bbox[1] >= t_y1  # either touching or completely below
+    )
+
+
+def check_notify_tag_area_for_encroachment(file_data: BytesIO) -> None | str:
+    """
+    This checks that no invisible/hidden are encroaching on the NOTIFY tag area
+    It returns the first detected encroachment, if any exists as an optimisation decision.
+    The primary aim of this check is to prevent precompiled letters with encroachments in the Notify tag area from being
+    sent to DVLA where they will be rejected.
+    """
+    file_data.seek(0)
+    doc = pymupdf.open("pdf", file_data)
+    page = doc[0]
+
+    # Extract bounding boxes in the top half of the PDF page.
+    # The coverage could be expanded if needed. The underlying mupdf engine(although extremely efficient as it is a C
+    # extension) discards partially overlapping bboxes which aren't completely in the provided target clip area.
+    # The strategy is to start conservatively and expand the scanned area if needed.
+    target_bounding_box = pymupdf.Rect(
+        0,  # x0
+        0,  # y0
+        A4_WIDTH * mm,  # x1
+        (A4_HEIGHT * mm) / 2,  # y1
+    )
+
+    data = page.get_text("dict", clip=target_bounding_box)
+    file_data.seek(0)
+
+    # To mitigate the performance hit of sorting in Python, hierarchical scalar bounding box checks are run across
+    # every structural level of the PDF, ie  to filter out unsuitable bounding boxes.
+    # PDF page layout is hierarchical with a tree structure,block -> line -> span, so every span will only be visited
+    # once and the only comparison is to the NOTIFY_TAG_BOUNDING_BOX (and the area to it's right along the width of the
+    # page), so even though the algorithm is a 3 level nested loop, the worst case scenario will be O(n).
+
+    for block in data.get("blocks", []):
+        if _no_intersect_with_notify_tag_bbox(block["bbox"]):
+            continue
+
+        for line in block.get("lines", []):
+            if _no_intersect_with_notify_tag_bbox(line["bbox"]):
+                continue
+
+            for span in line.get("spans", []):
+                if _no_intersect_with_notify_tag_bbox(span["bbox"]):
+                    continue
+
+                text = span["text"]
+
+                # Account for the fact that the text "NOTIFY" is in the notify_tag bounding box
+                if text == NOTIFY_TAG_TEXT:
+                    continue
+                # Any other text or trailing ghost spaces will trigger an encroachment
+                if text:
+                    return text
+
+    return None
+
+
 def add_notify_tag_to_letter(src_pdf):
     """
     Adds the word 'NOTIFY' to the first page of the PDF
@@ -537,8 +704,7 @@ def add_notify_tag_to_letter(src_pdf):
 
     pdf = PdfReader(src_pdf)
     page = pdf.pages[0]
-    can = NotifyCanvas(white)
-    pdfmetrics.registerFont(TTFont(FONT, TRUE_TYPE_FONT_FILE))
+    can = NotifyCanvas(white)  # [NotifyNL] which registers FONT
     can.setFont(FONT, NOTIFY_TAG_FONT_SIZE)
 
     x = NOTIFY_TAG_FROM_LEFT_OF_PAGE * mm
@@ -563,14 +729,20 @@ def add_notify_tag_to_letter(src_pdf):
 
 @sentry_sdk.trace
 def get_invalid_pages_with_message(
-    src_pdf, is_an_attachment=False, letter_address_placement=DEFAULT_LETTER_ADDRESS_PLACEMENT
+    src_pdf,
+    is_an_attachment=False,
+    letter_address_placement=DEFAULT_LETTER_ADDRESS_PLACEMENT,
+    letter_address_window=None,
 ):
     invalid_pages = _get_pages_with_invalid_orientation_or_size(src_pdf)
     if len(invalid_pages) > 0:
         return "letter-not-a4-portrait-oriented", invalid_pages
 
     pdf_to_validate = _overlay_printable_areas_with_white(
-        src_pdf, is_an_attachment=is_an_attachment, letter_address_placement=letter_address_placement
+        src_pdf,
+        is_an_attachment=is_an_attachment,
+        letter_address_placement=letter_address_placement,
+        letter_address_window=letter_address_window,
     )
     invalid_pages = list(_get_out_of_bounds_pages(pdf_to_validate))
     if len(invalid_pages) > 0:
@@ -630,7 +802,10 @@ def _get_pages_with_invalid_orientation_or_size(src_pdf):
 
 
 def _overlay_printable_areas_with_white(
-    src_pdf, is_an_attachment=False, letter_address_placement=DEFAULT_LETTER_ADDRESS_PLACEMENT
+    src_pdf,
+    is_an_attachment=False,
+    letter_address_placement=DEFAULT_LETTER_ADDRESS_PLACEMENT,
+    letter_address_window=None,
 ):
     """
     Overlays the printable areas onto the src PDF, this is so the code can check for a presence of non white in the
@@ -645,6 +820,9 @@ def _overlay_printable_areas_with_white(
     This doesn't affect the red overlays we draw when displaying to end users, so people should still layout their PDFs
     based on the published constraints.
 
+    [NotifyNL] Except for a window with a postage area (Pingen's): its postage and address areas get no extra 1mm, see
+    _overlay_printable_areas_around_postage_area_with_white.
+
     For letter attachments, there is no address page, so we overlay all pages like we would subsequent pages
     of a full letter.
 
@@ -657,7 +835,9 @@ def _overlay_printable_areas_with_white(
     page_number = 0
 
     if not is_an_attachment:
-        _overlay_printable_areas_of_address_block_page_with_white(pdf, letter_address_placement)
+        _overlay_printable_areas_of_address_block_page_with_white(
+            pdf, letter_address_placement, letter_address_window=letter_address_window
+        )
         page_number = 1
 
     # For each subsequent page its just the body of text
@@ -683,14 +863,24 @@ def _overlay_printable_areas_with_white(
     return out
 
 
-def _overlay_printable_areas_of_address_block_page_with_white(pdf, letter_address_placement):
+def _overlay_printable_areas_of_address_block_page_with_white(
+    pdf, letter_address_placement, letter_address_window=None
+):
     page = pdf.pages[0]
     can = NotifyCanvas(white)
 
-    address_top = address_top_from_top_of_page(letter_address_placement)
-    address_bottom = address_bottom_from_top_of_page(letter_address_placement)
-    logo_bottom = logo_bottom_from_top_of_page(letter_address_placement)
-    body_top = body_top_from_top_of_page(letter_address_placement)
+    # [NotifyNL] the address window's areas decide what's printable on the first page
+    letter_address_window = _letter_address_window(letter_address_window, letter_address_placement)
+    if letter_address_window.postage_area:
+        _overlay_printable_areas_around_postage_area_with_white(can, letter_address_window)
+        page.merge_page(PdfReader(can.get_bytes()).pages[0])
+        return
+
+    address = letter_address_window.address_area
+    address_top = address.y
+    address_bottom = address.bottom
+    logo_bottom = logo_bottom_from_top_of_page(letter_address_window)
+    body_top = body_top_from_top_of_page(letter_address_window)
 
     # Overlay the blanks where the service can print as per the template
     # The first page is more varied because of address blocks etc subsequent pages are more simple
@@ -717,8 +907,8 @@ def _overlay_printable_areas_of_address_block_page_with_white(pdf, letter_addres
     can.rect(pt1, pt2)
 
     # Citizen Address Block - the address window
-    pt1 = ADDRESS_LEFT_FROM_LEFT_OF_PAGE - 1, address_top - 1
-    pt2 = ADDRESS_RIGHT_FROM_LEFT_OF_PAGE + 1, address_bottom + 1
+    pt1 = address.x - 1, address_top - 1
+    pt2 = address.right + 1, address_bottom + 1
     can.rect(pt1, pt2)
 
     # move to the beginning of the StringIO buffer
@@ -727,8 +917,30 @@ def _overlay_printable_areas_of_address_block_page_with_white(pdf, letter_addres
     page.merge_page(new_pdf.pages[0])
 
 
+def _overlay_printable_areas_around_postage_area_with_white(can, letter_address_window):
+    """
+    [NotifyNL] For a print provider's own window (Pingen's): everything inside the border is printable except its
+    postage area around the address area, where the provider's envelope window and postage marks go. Unlike the other
+    boundaries, the postage and address areas' edges get no extra 1mm: the provider checks them exactly.
+
+    Anti-aliasing doesn't make that stricter than the provider: content flush with the address area's edges still
+    passes, because the white overlay covers the same partly-covered edge pixels. Content past an edge fails within a
+    pixel (0.13mm at 200 dpi): from 0.02 to 0.15mm past it, depending on where the edge falls inside a pixel.
+    """
+    postage = letter_address_window.postage_area
+    address = letter_address_window.address_area
+    left, top = BORDER_LEFT_FROM_LEFT_OF_PAGE - 1, BORDER_TOP_FROM_TOP_OF_PAGE - 1
+    right, bottom = BORDER_RIGHT_FROM_LEFT_OF_PAGE + 1, BORDER_BOTTOM_FROM_TOP_OF_PAGE + 1
+
+    can.rect((left, top), (right, postage.y))  # above the postage area
+    can.rect((left, postage.bottom), (right, bottom))  # below it
+    can.rect((left, postage.y), (postage.x, postage.bottom))  # left of it
+    can.rect((postage.right, postage.y), (right, postage.bottom))  # right of it
+    can.rect((address.x, address.y), (address.right, address.bottom))  # the address inside it
+
+
 def _colour_no_print_areas_of_single_page_pdf_in_red(
-    src_pdf, is_first_page, letter_address_placement=DEFAULT_LETTER_ADDRESS_PLACEMENT
+    src_pdf, is_first_page, letter_address_placement=DEFAULT_LETTER_ADDRESS_PLACEMENT, letter_address_window=None
 ):
     """
     Overlays the non-printable areas onto the src PDF, this is so users know which parts of they letter fail validation.
@@ -749,7 +961,9 @@ def _colour_no_print_areas_of_single_page_pdf_in_red(
         raise InvalidRequest("_colour_no_print_areas_of_page_in_red should only be called for a one-page-pdf")
 
     page = pdf.pages[0]
-    _colour_no_print_areas_of_page_in_red(page, is_first_page, letter_address_placement)
+    _colour_no_print_areas_of_page_in_red(
+        page, is_first_page, letter_address_placement, letter_address_window=letter_address_window
+    )
 
     out = bytesio_from_pdf(pdf)
     # it's a good habit to put things back exactly the way we found them
@@ -758,7 +972,7 @@ def _colour_no_print_areas_of_single_page_pdf_in_red(
 
 
 def _colour_no_print_areas_of_page_in_red(
-    page, is_first_page, letter_address_placement=DEFAULT_LETTER_ADDRESS_PLACEMENT
+    page, is_first_page, letter_address_placement=DEFAULT_LETTER_ADDRESS_PLACEMENT, letter_address_window=None
 ):
     """
     Overlays the non-printable areas onto a single page. It adds red areas (if `is_first_page` is set, then it'll add
@@ -792,23 +1006,33 @@ def _colour_no_print_areas_of_page_in_red(
     can.rect(pt1, pt2)
 
     # The first page is more varied because of address blocks etc subsequent pages are more simple
-    if is_first_page:
-        address_top = address_top_from_top_of_page(letter_address_placement)
-        logo_bottom = logo_bottom_from_top_of_page(letter_address_placement)
-        body_top = body_top_from_top_of_page(letter_address_placement)
+    letter_address_window = _letter_address_window(letter_address_window, letter_address_placement)
+    if is_first_page and letter_address_window.postage_area:
+        # [NotifyNL] a print provider's own window: the postage area around the address area
+        postage = letter_address_window.postage_area
+        address = letter_address_window.address_area
+        can.rect((postage.x, postage.y), (postage.right, address.y))  # above the address
+        can.rect((postage.x, address.bottom), (postage.right, postage.bottom))  # below it
+        can.rect((postage.x, address.y), (address.x, address.bottom))  # left of it
+        can.rect((address.right, address.y), (postage.right, address.bottom))  # right of it
+    elif is_first_page:
+        address = letter_address_window.address_area
+        address_top = address.y
+        logo_bottom = logo_bottom_from_top_of_page(letter_address_window)
+        body_top = body_top_from_top_of_page(letter_address_window)
 
         # left from address block (from logo area all the way to body)
         pt1 = BORDER_LEFT_FROM_LEFT_OF_PAGE, logo_bottom
-        pt2 = ADDRESS_LEFT_FROM_LEFT_OF_PAGE, body_top
+        pt2 = address.x, body_top
         can.rect(pt1, pt2)
 
         # directly above address block
-        pt1 = ADDRESS_LEFT_FROM_LEFT_OF_PAGE, logo_bottom
-        pt2 = ADDRESS_RIGHT_FROM_LEFT_OF_PAGE, address_top
+        pt1 = address.x, logo_bottom
+        pt2 = address.right, address_top
         can.rect(pt1, pt2)
 
         # right from address block (from logo area all the way to body)
-        pt1 = ADDRESS_RIGHT_FROM_LEFT_OF_PAGE, logo_bottom
+        pt1 = address.right, logo_bottom
         pt2 = SERVICE_ADDRESS_LEFT_FROM_LEFT_OF_PAGE, body_top
         can.rect(pt1, pt2)
 
@@ -861,26 +1085,31 @@ def _get_out_of_bounds_pages(src_pdf_bytes):
 
 
 @sentry_sdk.trace
-def rewrite_address_block(pdf, *, page_count, allow_international_letters, filename, letter_address_placement):
-    address = extract_address_block(pdf, letter_address_placement=letter_address_placement)
+def rewrite_address_block(
+    pdf, *, page_count, allow_international_letters, filename, letter_address_placement, letter_address_window=None
+):
+    letter_address_window = _letter_address_window(letter_address_window, letter_address_placement)
+    address = extract_address_block(pdf, letter_address_window=letter_address_window)
     address.allow_international_letters = allow_international_letters
 
     if address.error_code:
         if address.error_code in PLACEMENT_MISMATCH_CANDIDATE_ERROR_CODES:
             # Too-few-lines/empty can mean either a genuinely malformed address, or a
-            # window anchored at the wrong placement clipping real content. Re-extract at
-            # the other of the two valid placements: if that comes back FULLY valid (not
-            # just "enough lines" - avoids false positives from incidental page text), it's
-            # confirmed evidence of a placement mismatch rather than a malformed address.
-            other_placement = _other_letter_address_placement(letter_address_placement)
-            other_address = extract_address_block(pdf, letter_address_placement=other_placement)
-            other_address.allow_international_letters = allow_international_letters
-            if not other_address.error_code:
-                raise ValidationFailed("address-placement-mismatch", [1], page_count=page_count)
+            # window anchored at the wrong placement clipping real content. Re-extract where
+            # else the address may sit (see _placement_mismatch_candidate_windows): if that
+            # comes back FULLY valid (not just "enough lines" - avoids false positives from
+            # incidental page text), it's confirmed evidence of a placement mismatch rather
+            # than a malformed address.
+            for other_window in _placement_mismatch_candidate_windows(letter_address_window):
+                other_address = extract_address_block(pdf, letter_address_window=other_window)
+                other_address.allow_international_letters = allow_international_letters
+                if not other_address.error_code:
+                    raise ValidationFailed("address-placement-mismatch", [1], page_count=page_count)
         raise ValidationFailed(address.error_code, [1], page_count=page_count)
 
-    # pdf = redact_precompiled_letter_address_block(pdf)
-    # pdf = add_address_to_precompiled_letter(pdf, address.normalised)
+    # [NOTIFYNL] The address block is only validated, not rewritten: unlike upstream, we don't
+    # redact it and redraw it from the normalised address (redact_precompiled_letter_address_block
+    # followed by add_address_to_precompiled_letter), so the sender's own layout is kept.
     return pdf, address.normalised
 
 
@@ -893,7 +1122,7 @@ def _extract_text_from_first_page_of_pdf(pdf, rect):
     :return: Any text found
     """
     pdf.seek(0)
-    doc = fitz.open("pdf", pdf)
+    doc = pymupdf.open("pdf", pdf)
     page = doc[0]
     ret = _extract_text_from_page(page, rect)
     pdf.seek(0)
@@ -911,43 +1140,59 @@ def _extract_text_from_page(page, rect):
     and is structured as follows:
     (x1, y1, x2, y2, word value, paragraph number, line number, word position within the line)
 
-    :param fitz.Page page: fitz page object from which to extract
+    :param pymupdf.Page page: pymupdf page object from which to extract
     :param rect: rectangle describing the area to extract from
     :return: Any text found
     """
     words = page.get_text_words()
-    mywords = [w for w in words if fitz.Rect(w[:4]).intersects(rect)]
+    mywords = [w for w in words if pymupdf.Rect(w[:4]).intersects(rect)]
 
     def _get_address_from_get_textwords():
         return page.get_text(clip=rect).strip()
 
     mywords.sort(key=itemgetter(-3, -2, -1))
-    group = groupby(mywords, key=itemgetter(3))
+    group = groupby(mywords, key=itemgetter(5, 6))
     extracted_text = []
-    for _y2, gwords in group:
+    for _block_line, gwords in group:
         extracted_text.append(" ".join(w[4] for w in gwords))
     extracted_text = "\n".join(extracted_text)
+
+    def _get_address_grouped_by_y2():
+        # group by block, then line
+        group = groupby(mywords, key=itemgetter(3))
+        extracted_text = []
+        for _y2, gwords in group:
+            extracted_text.append(" ".join(w[4] for w in gwords))
+        extracted_text = "\n".join(extracted_text)
+        return extracted_text
 
     if rect != NOTIFY_TAG_BOUNDING_BOX and PrecompiledPostalAddress(
         _get_address_from_get_textwords()
     ) != PrecompiledPostalAddress(extracted_text):
-        # grouping by paragraph ended up different to grouping by y2. lets just log for now. we might want to swap over
-        # in the future but without knowing how much it changes we cant be sure
-        current_app.logger.info("Address extraction different between y2 and get_text")
+        # Log differences between our current address extraction methods and get_text.
+        # We might want to swap over in the future but without knowing how much it changes we cant be sure
+        current_app.logger.info("Address extraction different between grouping by line and get_text")
+
+    if rect != NOTIFY_TAG_BOUNDING_BOX and PrecompiledPostalAddress(
+        _get_address_grouped_by_y2()
+    ) != PrecompiledPostalAddress(extracted_text):
+        # log the difference between grouping by y co-ordinate and by line, both using the get_text_words function
+        current_app.logger.info("Address extraction different when splitting address by y2 vs by line")
 
     # normalizing to NFKD replaces characters with compatibility mode equivalents - including replacing
     # ligatures like ﬀ with ff
     return unicodedata.normalize("NFKD", extracted_text)
 
 
-def extract_address_block(pdf, letter_address_placement=DEFAULT_LETTER_ADDRESS_PLACEMENT):
+def extract_address_block(pdf, letter_address_placement=DEFAULT_LETTER_ADDRESS_PLACEMENT, letter_address_window=None):
     """
     Extracts all text within the text block
     :param BytesIO pdf: pdf bytestream from which to extract
     :return: multi-line address string
     """
+    letter_address_window = _letter_address_window(letter_address_window, letter_address_placement)
     return PrecompiledPostalAddress(
-        _extract_text_from_first_page_of_pdf(pdf, address_bounding_box(letter_address_placement))
+        _extract_text_from_first_page_of_pdf(pdf, _address_bounding_box_of(letter_address_window))
     )
 
 
@@ -966,7 +1211,7 @@ def _get_pages_with_notify_tag(src_pdf_bytes, is_an_attachment=False):
     sent via notify
     """
     src_pdf_bytes.seek(0)
-    doc = fitz.open("pdf", src_pdf_bytes)
+    doc = pymupdf.open("pdf", src_pdf_bytes)
     starting_page_index = 1
     if is_an_attachment:
         starting_page_index = 0
@@ -987,7 +1232,7 @@ def _get_pages_with_notify_tag(src_pdf_bytes, is_an_attachment=False):
 
 def redact_precompiled_letter_address_block(pdf, letter_address_placement=DEFAULT_LETTER_ADDRESS_PLACEMENT):
     pdf.seek(0)  # make sure we're at the beginning
-    doc = fitz.open("pdf", pdf)
+    doc = pymupdf.open("pdf", pdf)
     first_page = doc[0]
 
     first_page.add_redact_annot(address_bounding_box(letter_address_placement))

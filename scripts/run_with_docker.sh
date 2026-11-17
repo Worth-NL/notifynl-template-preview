@@ -12,7 +12,6 @@ docker run -it --rm \
   --network notifynl-devcontainer_devcontainer_devcontainer \
   -e NOTIFY_ENVIRONMENT=development \
   -e FLASK_DEBUG=1 \
-  -e STATSD_ENABLED= \
   -e AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-test} \
   -e AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-test} \
   -e AWS_ENDPOINT_URL=${AWS_ENDPOINT_URL:-http://ministack:4566} \

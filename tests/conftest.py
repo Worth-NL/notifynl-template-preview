@@ -1,9 +1,11 @@
 from contextlib import contextmanager
+from functools import cache
 from io import BytesIO
 
 import pytest
 from botocore.response import StreamingBody
 from notifications_utils.s3 import S3ObjectNotFound
+from PIL import Image
 
 from app import create_app
 
@@ -112,6 +114,44 @@ def welsh_data_for_create_pdf_for_templated_letter_task():
 @pytest.fixture
 def auth_header():
     return {"Authorization": "Token my-secret-key"}
+
+
+@cache
+def _make_png_bytes(*args, **kwargs):
+    img = Image.new(*args, **kwargs)
+    f = BytesIO()
+    img.save(f, "png")
+    return f.getvalue()
+
+
+@pytest.fixture
+def mock_weasyprint_logos(app, mocker):
+    def mock_open_side_effect(self, http_request, *args, **kwargs):
+        from .pdf_consts import hm_government_svg
+
+        req_url = http_request.full_url
+        if req_url == f"{app.config['LETTER_LOGO_URL']}/static/images/letter-template/hm-government.svg":
+            mock_response = BytesIO(hm_government_svg)
+            mock_response.headers = {"content-type": "image/svg+xml"}
+            mock_response.url = req_url
+            mock_response.status = 200
+            return mock_response
+        elif req_url == f"{app.config['LETTER_LOGO_URL']}/static/images/letter-template/type29.png":
+            mock_response = BytesIO(_make_png_bytes("RGB", (480, 159), "pink"))
+            mock_response.headers = {"content-type": "image/png"}
+            mock_response.url = req_url
+            mock_response.status = 200
+            return mock_response
+        elif req_url == f"{app.config['LETTER_LOGO_URL']}/static/images/letter-template/qr1.png":
+            mock_response = BytesIO(_make_png_bytes("RGB", (145, 145), "orange"))
+            mock_response.headers = {"content-type": "image/png"}
+            mock_response.url = req_url
+            mock_response.status = 200
+            return mock_response
+        else:
+            raise ValueError("unmocked url")
+
+    return mocker.patch("urllib.request.OpenerDirector.open", autospec=True, side_effect=mock_open_side_effect)
 
 
 @pytest.fixture(autouse=True)

@@ -10,8 +10,6 @@ DOCKER_IMAGE = ghcr.io/alphagov/notify/notifications-template-preview
 DOCKER_IMAGE_TAG = $(shell git describe --always --dirty)
 DOCKER_IMAGE_NAME = ${DOCKER_IMAGE}:${DOCKER_IMAGE_TAG}
 
-EXCLUDE_REQUIREMENTS_NEWER_THAN_DAYS ?= 7
-
 .PHONY: help
 help:
 	@cat $(MAKEFILE_LIST) | grep -E '^[a-zA-Z_-]+:.*?## .*$$' | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}'
@@ -21,15 +19,15 @@ help:
 
 .PHONY: freeze-requirements
 freeze-requirements: ## create static requirements.txt
-	uv pip compile requirements.in -o requirements.txt $(EXTRA_UV_PIP_COMPILE_FLAGS)
-	uv pip sync requirements.txt
+	uv pip install "`cat requirements.in | grep 'notifications-utils @'`"
 	python -c "from notifications_utils.version_tools import copy_config; copy_config()"
-	uv pip compile requirements_for_test.in -o requirements_for_test.txt $(EXTRA_UV_PIP_COMPILE_FLAGS)
+	uv pip compile --quiet requirements.in -o requirements.txt $(EXTRA_UV_PIP_COMPILE_FLAGS)
+	uv pip compile --quiet requirements_for_test.in -o requirements_for_test.txt $(EXTRA_UV_PIP_COMPILE_FLAGS)
 	uv pip sync requirements_for_test.txt
 
 .PHONY: refreeze-requirements
 refreeze-requirements: ## Update unpinned requirements
-	EXTRA_UV_PIP_COMPILE_FLAGS="--upgrade --exclude-newer $(EXCLUDE_REQUIREMENTS_NEWER_THAN_DAYS)d" make freeze-requirements
+	EXTRA_UV_PIP_COMPILE_FLAGS="--upgrade" make freeze-requirements
 
 .PHONY: show-outdated-requirements
 show-outdated-requirements: ## Audit requirements.in
@@ -43,14 +41,25 @@ bump-utils:  # Bump notifications-utils package to latest version
 generate-version-file:
 	@echo -e "__git_commit__ = \"${GIT_COMMIT}\"\n__time__ = \"${DATE}\"" > ${APP_VERSION_FILE}
 
+NOTIFY_ASSETS_REPO = git@github.com:alphagov/notifications-private-assets.git
+NOTIFY_ASSETS_DIR ?= ../notifications-private-assets
+
+$(NOTIFY_ASSETS_DIR):
+	@echo "Notify assets repository not found. Cloning..."
+	git clone $(NOTIFY_ASSETS_REPO) $(NOTIFY_ASSETS_DIR)
+
+docker/Arial.ttf: $(NOTIFY_ASSETS_DIR)
+	@echo "Copying Arial.ttf from repository..."
+	cp $(NOTIFY_ASSETS_DIR)/fonts/Arial.ttf $@
+
 .PHONY: bootstrap
 bootstrap: generate-version-file
 	uv pip install -r requirements_for_test.txt
 
 # ---- DOCKER COMMANDS ---- #
 
-.PHONY: bootstrap
-bootstrap-with-docker: generate-version-file ## Setup environment to run app commands
+.PHONY: bootstrap-with-docker
+bootstrap-with-docker: generate-version-file docker/Arial.ttf ## Setup environment to run app commands
 	docker build -f docker/Dockerfile --target test -t notifications-template-preview .
 
 .PHONY: run-flask-with-docker
@@ -66,6 +75,7 @@ run-celery-with-docker: ## Run celery in Docker container
 lint: ## Run static analysis
 	ruff check .
 	ruff format --check .
+	grep '^\*\*/\.git/config$$' ./.dockerignore > /dev/null
 
 .PHONY: test
 test: lint ## Run tests (used by Concourse)

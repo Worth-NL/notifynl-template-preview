@@ -6,7 +6,7 @@ from flask import current_app
 from notifications_utils.s3 import s3download
 
 from app import ValidationFailed
-from app.utils import caching_s3download, merge_letter_parts
+from app.utils import caching_s3download, merge_letter_parts, stitch_pdfs
 
 
 @sentry_sdk.trace
@@ -15,6 +15,19 @@ def get_attachment_pdf(service_id, attachment_id) -> BytesIO:
         current_app.config["LETTER_ATTACHMENT_BUCKET_NAME"],
         f"service-{service_id}/{attachment_id}.pdf",
     )
+
+
+# [NOTIFYNL] Upstream's single-attachment version, kept unchanged so upstream's tests still import it. NL letters go
+# through add_attachments_to_letter below, which also adds ad-hoc attachments.
+def add_attachment_to_letter(service_id, templated_letter_pdf: BytesIO, attachment_object: dict) -> BytesIO:
+    attachment_pdf = get_attachment_pdf(service_id, attachment_object["id"])
+
+    stitched_pdf = stitch_pdfs(
+        first_pdf=templated_letter_pdf,
+        second_pdf=attachment_pdf,
+    )
+
+    return stitched_pdf
 
 
 def get_adhoc_attachment_pdfs(attachment_keys: list[str], *, allow_international_letters: bool) -> list[BytesIO]:
