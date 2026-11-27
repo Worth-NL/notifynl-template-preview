@@ -11,239 +11,61 @@ on:
       - reopened
       - ready_for_review
 
-concurrency:
-  group: ${{ github.workflow }}.${{ github.ref }}
-  cancel-in-progress: true
-
+# No workflow-level concurrency: it would cancel a running helm upgrade in `deploy`.
 permissions:
   contents: read
-
-env:
-  IMAGE: ghcr.io/worth-nl/notifynl-template-preview
 
 jobs:
   unit-test:
     runs-on: ubuntu-latest
 
-    permissions:
-      contents: read
-      actions: read
-      checks: write
+    concurrency:
+      group: ${{ github.workflow }}.${{ github.ref }}.unit-test
+      cancel-in-progress: true
 
     env:
       LETTER_LOGO_URL: ${{ secrets.LETTER_LOGO_URL }}
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
+    permissions:
+      contents: read
+      actions: read
+      checks: write
+
     steps:
       - uses: actions/checkout@v4
-
-      - uses: astral-sh/ruff-action@v3
-        with:
-          version-file: requirements_nl_test.txt
-
-      - uses: docker/setup-buildx-action@v3
 
       # Tests run in the Dockerfile_nl test image (built on the production stage), so they use the same
       # Debian libraries as production, e.g. WeasyPrint's HarfBuzz font subsetting
-      - uses: docker/build-push-action@v6
+      - uses: Worth-NL/ci-workflows/.github/actions/docker-test@main
         with:
-          file: docker/Dockerfile_nl
-          target: test
-          load: true
-          tags: template-preview:test
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Check superseded_tests_nl.toml
-        run: docker run --rm --entrypoint pytest template-preview:test --collect-only -qq --nl-verify
-
-      - name: Run unit tests
-        run: >-
-          docker run --name unit-tests
-          -e TZ=Europe/Amsterdam -e LETTER_LOGO_URL -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY
-          --entrypoint pytest template-preview:test --junitxml=reports/pytest-unit.xml
-
-      - name: Copy test report out of the container
-        if: ${{ !cancelled() }}
-        run: docker cp unit-tests:/home/vcap/app/reports ./reports
-
-      # dorny/test-reporter, with xfailed and superseded tests counted separately from skipped
-      - uses: Worth-NL/ci-workflows/.github/actions/pytest-report@main
-        if: ${{ !cancelled() }}
+          image: template-preview:test
+          env-names: LETTER_LOGO_URL AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
 
   build:
     if: github.event.pull_request.draft == false
-    runs-on: ubuntu-latest
     needs: unit-test
-
+    concurrency:
+      group: ${{ github.workflow }}.${{ github.ref }}.build
+      cancel-in-progress: true
     permissions:
       contents: read
       packages: write
-
-    steps:
-      - name: Set tag
-        id: set-tag
-        run: |
-          TAG=$(date +%Y%m%d).${{ github.run_number }}-pr
-          echo "tag=$TAG" >> $GITHUB_OUTPUT
-
-      - uses: docker/login-action@v3
-        with:
-          registry: https://ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - uses: docker/setup-qemu-action@v3
-        name: Setup QEMU
-
-      - uses: docker/setup-buildx-action@v3
-        name: Setup buildx
-
-      - uses: docker/build-push-action@v6
-        with:
-          file: docker/Dockerfile_nl
-          push: true
-          tags: ${{ env.IMAGE }}:${{ steps.set-tag.outputs.tag }}
-          platforms: linux/amd64
-          provenance: false
-          target: production
-        name: Docker build and push ${{ steps.set-tag.outputs.tag }}
-
-    outputs:
-      tag: ${{ steps.set-tag.outputs.tag }}
+    uses: Worth-NL/ci-workflows/.github/workflows/build-image.yml@main
+    with:
+      image: ghcr.io/worth-nl/notifynl-template-preview
 
   deploy:
     if: github.event.pull_request.draft == false && github.base_ref == 'develop'
-    runs-on: ubuntu-latest
     needs: build
-
-    environment:
-      name: Test
-
     permissions:
       contents: read
       pull-requests: write
-
-    env:
-      HELM_SET_ARGS: >-
-        --set apps.templatePreviewApi.image.tag=${{ needs.build.outputs.tag }}
-        --set apps.templatePreviewWorker.image.tag=${{ needs.build.outputs.tag }}
-
-    steps:
-      # Order matters: actions/checkout defaults to `clean: true`, which runs
-      # `git clean -ffdx` in its checkout path. A checkout with no `path:`
-      # (this one) targets the workspace root, and that clean can wipe a
-      # sibling directory checked out earlier by a separate actions/checkout
-      # step (https://github.com/orgs/community/discussions/27030) — so the
-      # root-targeting checkout must run first, before notifynl-template-preview exists.
-      - uses: actions/checkout@v4
-        with:
-          repository: Worth-NL/notifynl-charts-private
-          ref: main
-          token: ${{ secrets.RELEASE_TOKEN }}
-        name: Checkout Worth-NL/notifynl-charts-private
-
-      - uses: actions/checkout@v4
-        with:
-          path: notifynl-template-preview
-        name: Checkout notifynl-template-preview (this PR)
-
-      # K8S_CONFIG is stored base64-encoded (shared with the other submodules'
-      # workflows, which still use bwvolleyball/k8s-toolkit and decode it
-      # internally). azure/k8s-set-context's `kubeconfig` method expects raw
-      # kubeconfig YAML, not base64, so decode it here first.
-      - name: Decode kubeconfig
-        id: decode-kubeconfig
-        run: |
-          {
-            echo "content<<KUBECONFIG_EOF"
-            echo "${{ secrets.K8S_CONFIG }}" | base64 -d
-            echo "KUBECONFIG_EOF"
-          } >> "$GITHUB_OUTPUT"
-
-      - uses: azure/k8s-set-context@v4
-        with:
-          method: kubeconfig
-          kubeconfig: ${{ steps.decode-kubeconfig.outputs.content }}
-
-      - uses: azure/setup-helm@v4
-        with:
-          version: v4.2.2
-
-      # `update` (unlike `build`) fetches any repository listed in
-      # notifynl-full's Chart.yaml on its own, so new chart dependencies
-      # need no `helm repo add` here. Versions there are pinned exactly, so
-      # it resolves the same charts Chart.lock records.
-      - name: Helm chart dependency update
-        run: helm dependency update
-        working-directory: ${{ github.workspace }}/notifynl-full
-
-      # Renders the chart and validates against the live cluster API/CRDs
-      # (required/fail template checks included) without persisting anything
-      # or scheduling any pods. Uses the exact same flags as the real deploy
-      # below so it can't drift out of sync and give a false pass.
-      - name: Pre-flight validation (dry-run, no cluster mutation)
-        id: helm-dry-run
-        run: |
-          set -x
-          helm upgrade --install notifynl notifynl-full/ \
-          -n ${{ vars.NAMESPACE }} \
-          --reset-then-reuse-values \
-          $HELM_SET_ARGS \
-          --rollback-on-failure \
-          --dry-run=server \
-          > /dev/null
-
-      - name: Deploy new tag
-        id: helm-deploy
-        run: |
-          set -x
-          helm upgrade --install notifynl notifynl-full/ \
-          -n ${{ vars.NAMESPACE }} \
-          --reset-then-reuse-values \
-          $HELM_SET_ARGS \
-          --rollback-on-failure \
-          --timeout 300s
-
-      - name: Comment on PR if deployment fails
-        if: failure() && (steps.helm-dry-run.outcome == 'failure' || steps.helm-deploy.outcome == 'failure') && github.event_name == 'pull_request'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const dryRunFailed = "${{ steps.helm-dry-run.outcome }}" === "failure";
-            const body = dryRunFailed
-              ? [
-                  "⚠️ **Test environment deployment blocked (pre-flight check failed)**",
-                  "",
-                  "- Environment: `Test`",
-                  "- Image tag: `${{ needs.build.outputs.tag }}`",
-                  "",
-                  "The pre-flight `helm upgrade --dry-run=server` check failed, so the real deploy never ran — **the cluster was not touched**, nothing to clean up.",
-                  "",
-                  "Check the workflow logs for the Helm error output. Most likely cause: `notifynl-full` added a new value with no chart default that this release doesn't have set yet — seed it once with a manual `helm upgrade --set <key>=<value>`, and future deploys will carry it forward automatically."
-                ].join("\n")
-              : [
-                  "❌ **Test environment deployment failed**",
-                  "",
-                  "- Environment: `Test`",
-                  "- Image tag: `${{ needs.build.outputs.tag }}`",
-                  "",
-                  "The pre-flight check passed but the real deploy failed — the cluster may be in a partial state.",
-                  "",
-                  "Check the workflow logs for the Helm error output.",
-                  "",
-                  "Check the test env k8s state/logs.",
-                  "",
-                  "Check if the helm release needs a rollback.",
-                  "",
-                  "Most likely issues:",
-                  "- Package visibility",
-                  "- ghcr.io credentials expiration or change"
-                ].join("\n");
-            github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              body
-            })
+    uses: Worth-NL/ci-workflows/.github/workflows/deploy-test.yml@main
+    with:
+      tag: ${{ needs.build.outputs.tag }}
+      image-keys: |
+        apps.templatePreviewApi
+        apps.templatePreviewWorker
+    secrets: inherit
